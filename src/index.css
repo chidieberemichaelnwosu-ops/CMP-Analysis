@@ -1,1 +1,80 @@
 @import "tailwindcss";
+
+@media print {
+  /* Hide the entire app, sidebars, navigations, and global components except the print preview container */
+  body * {
+    visibility: hidden;
+    background-image: none !important;
+    background-color: transparent !important;
+    color: #000 !important;
+    box-shadow: none !important;
+  }
+
+  #print-preview-container,
+  #print-preview-container * {
+    visibility: visible;
+  }
+
+  /* Position print container at top left */
+  #print-preview-container {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    background: white !important;
+  }
+
+  #print-preview-container > div {
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+  }
+
+  /* Set paper layout to landscape */
+  @page {
+    size: A4 landscape;
+    margin: 15mm 15mm 15mm 15mm;
+  }
+
+  /* Force table headers to repeat on every page */
+  thead {
+    display: table-header-group !important;
+  }
+
+  tr {
+    page-break-inside: avoid !important;
+  }
+
+  /* Page breaks between LGA groupings or specific sections */
+  .page-break-after {
+    page-break-after: always !important;
+  }
+
+  /* Enforce table borders and background colors */
+  table {
+    border: 1px solid #111 !important;
+    border-collapse: collapse !important;
+  }
+
+  th, td {
+    border: 1px solid #222 !important;
+    padding: 6px 10px !important;
+  }
+
+  .bg-yellow-100 {
+    background-color: #fef08a !important; /* Gold highlight */
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .bg-slate-100 {
+    background-color: #f1f5f9 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}
+

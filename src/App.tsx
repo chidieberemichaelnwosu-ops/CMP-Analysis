@@ -570,6 +570,9 @@ export default function App() {
                       aggregations={reportResults.aggregations}
                       filters={filters}
                       fileName={fileName}
+                      beneficiaries={beneficiaries}
+                      targetDate={targetDate}
+                      setFilters={setFilters}
                     />
                   )}
 
