@@ -1,0 +1,6 @@
+{
+  "name": "CMP Analytics & Performance Reporting System (CAPRS)",
+  "description": "A professional enterprise-grade Business Intelligence, Monitoring & Evaluation, and Performance Analytics platform for Child Monitor Plus (CMP) that transforms line list files into interactive dashboards, analytical reports, and AI executive summaries.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
