@@ -8,6 +8,7 @@ import { Search, X, Download, Printer, FileSpreadsheet, ChevronLeft, ChevronRigh
 import * as XLSX from "xlsx";
 import { jsPDF } from "jspdf";
 import html2canvas from "html2canvas";
+import { prepareStylesheetsForHtml2Canvas } from "../utils/cssSanitizer";
 import { Beneficiary } from "../types";
 import { parseDate } from "../utils/reportingEngine";
 
@@ -292,6 +293,14 @@ export default function ClinicalDrilldownModal({
   const handleExportPDF = async () => {
     const element = document.getElementById("drilldown-table-capture");
     if (!element) return;
+    
+    let restoreStylesheets: (() => void) | null = null;
+    try {
+      restoreStylesheets = await prepareStylesheetsForHtml2Canvas();
+    } catch (err) {
+      console.error("Failed to temporarily sanitize stylesheets for html2canvas", err);
+    }
+
     try {
       const canvas = await html2canvas(element, { scale: 1.5 });
       const imgData = canvas.toDataURL("image/png");
@@ -316,6 +325,10 @@ export default function ClinicalDrilldownModal({
     } catch (err) {
       console.error("PDF generation failed:", err);
       alert("Could not generate PDF. Please try printing directly or exporting to Excel/CSV.");
+    } finally {
+      if (restoreStylesheets) {
+        restoreStylesheets();
+      }
     }
   };
 
