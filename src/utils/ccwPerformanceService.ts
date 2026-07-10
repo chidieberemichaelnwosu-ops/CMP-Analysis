@@ -14,6 +14,7 @@ export interface CCWPerformanceRow {
   hei: number;
   calhivServed: number;
   heiServed: number;
+  totalServed: number;
   servedPercent: number;
   outstanding: number;
   community: string;
@@ -28,6 +29,7 @@ export interface LGAPerformanceGroup {
   hei: number;
   calhivServed: number;
   heiServed: number;
+  totalServed: number;
   servedPercent: number;
   outstanding: number;
   ccws: CCWPerformanceRow[];
@@ -48,6 +50,7 @@ export interface CCWPerformanceReportResult {
     hei: number;
     calhivServed: number;
     heiServed: number;
+    totalServed: number;
     servedPercent: number;
     outstanding: number;
   };
@@ -70,6 +73,11 @@ export function calculateCCWPerformance(
     // Only Active beneficiaries contribute to performance
     // Exclude: Inactive, Migrated, Exited, Transferred Out, Deceased
     if (b.OVCStatus !== "Active") {
+      return;
+    }
+
+    // Only CALHIV and HEI enrolment streams are tracked in the CCW Monthly Performance Report
+    if (b.EnrolmentStream !== "CALHIV" && b.EnrolmentStream !== "HEI") {
       return;
     }
 
@@ -96,6 +104,7 @@ export function calculateCCWPerformance(
         hei: 0,
         calhivServed: 0,
         heiServed: 0,
+        totalServed: 0,
         servedPercent: 0,
         outstanding: 0,
         community: b.Community || "N/A",
@@ -137,10 +146,10 @@ export function calculateCCWPerformance(
 
   // Calculate derivatives for each CCW record
   const ccwRows: CCWPerformanceRow[] = Array.from(ccwMap.values()).map((row) => {
-    const totalServed = row.calhivServed + row.heiServed;
-    row.outstanding = row.cmp - totalServed;
+    row.totalServed = row.calhivServed + row.heiServed;
+    row.outstanding = row.cmp - row.totalServed;
     // Served % = (Total Served / CMP) * 100
-    row.servedPercent = row.cmp > 0 ? Math.round((totalServed / row.cmp) * 100) : 0;
+    row.servedPercent = row.cmp > 0 ? Math.round((row.totalServed / row.cmp) * 100) : 0;
     return row;
   });
 
@@ -166,6 +175,7 @@ export function calculateCCWPerformance(
     let lgaHei = 0;
     let lgaCalhivServed = 0;
     let lgaHeiServed = 0;
+    let lgaTotalServed = 0;
 
     ccws.forEach((c) => {
       lgaCmp += c.cmp;
@@ -173,6 +183,7 @@ export function calculateCCWPerformance(
       lgaHei += c.hei;
       lgaCalhivServed += c.calhivServed;
       lgaHeiServed += c.heiServed;
+      lgaTotalServed += c.totalServed;
 
       // Validate each CCW row according to requirements:
       // 1. CMP = CALHIV + HEI
@@ -184,33 +195,50 @@ export function calculateCCWPerformance(
           message: `Mathematical Discrepancy for CCW "${c.ccwName}" in LGA "${lgaName}": Active CMP (${c.cmp}) does not equal CALHIV (${c.calhiv}) + HEI (${c.hei}).`
         });
       }
-      // 2. Total Served = CALHIV Served + HEI Served (implicit in definition, but we check limits)
-      const totServed = c.calhivServed + c.heiServed;
-      // 3. Outstanding = CMP - Total Served
-      if (c.outstanding !== c.cmp - totServed) {
+      // 2. Total Served = CALHIV Served + HEI Served
+      if (c.totalServed !== c.calhivServed + c.heiServed) {
         validationErrors.push({
           type: "CCW",
           name: c.ccwName,
           parentLga: lgaName,
-          message: `Mathematical Discrepancy for CCW "${c.ccwName}" in LGA "${lgaName}": Outstanding (${c.outstanding}) does not equal CMP (${c.cmp}) minus Total Served (${totServed}).`
+          message: `Mathematical Discrepancy for CCW "${c.ccwName}" in LGA "${lgaName}": Total Served (${c.totalServed}) does not equal CALHIV Served (${c.calhivServed}) + HEI Served (${c.heiServed}).`
+        });
+      }
+      // 3. Outstanding = CMP - Total Served
+      if (c.outstanding !== c.cmp - c.totalServed) {
+        validationErrors.push({
+          type: "CCW",
+          name: c.ccwName,
+          parentLga: lgaName,
+          message: `Mathematical Discrepancy for CCW "${c.ccwName}" in LGA "${lgaName}": Outstanding (${c.outstanding}) does not equal CMP (${c.cmp}) minus Total Served (${c.totalServed}).`
         });
       }
       // 4. Total Served <= CMP
-      if (totServed > c.cmp) {
+      if (c.totalServed > c.cmp) {
         validationErrors.push({
           type: "CCW",
           name: c.ccwName,
           parentLga: lgaName,
-          message: `Inconsistent Data state for CCW "${c.ccwName}" in LGA "${lgaName}": Total Served (${totServed}) exceeds Active CMP (${c.cmp}).`
+          message: `Inconsistent Data state for CCW "${c.ccwName}" in LGA "${lgaName}": Total Served (${c.totalServed}) exceeds Active CMP (${c.cmp}).`
+        });
+      }
+      // 5. Served % = (Total Served / CMP) * 100
+      const expectedServedPercent = c.cmp > 0 ? Math.round((c.totalServed / c.cmp) * 100) : 0;
+      if (c.servedPercent !== expectedServedPercent) {
+        validationErrors.push({
+          type: "CCW",
+          name: c.ccwName,
+          parentLga: lgaName,
+          message: `Mathematical Discrepancy for CCW "${c.ccwName}" in LGA "${lgaName}": Served % (${c.servedPercent}%) does not match expected percentage (${expectedServedPercent}%).`
         });
       }
     });
 
-    const lgaTotalServed = lgaCalhivServed + lgaHeiServed;
     const lgaOutstanding = lgaCmp - lgaTotalServed;
     const lgaServedPercent = lgaCmp > 0 ? Math.round((lgaTotalServed / lgaCmp) * 100) : 0;
 
     // Validate LGA aggregates
+    // 1. CMP = CALHIV + HEI
     if (lgaCmp !== lgaCalhiv + lgaHei) {
       validationErrors.push({
         type: "LGA",
@@ -218,6 +246,15 @@ export function calculateCCWPerformance(
         message: `Mathematical Discrepancy for LGA "${lgaName}": Aggregated CMP (${lgaCmp}) does not equal CALHIV (${lgaCalhiv}) + HEI (${lgaHei}).`
       });
     }
+    // 2. Total Served = CALHIV Served + HEI Served
+    if (lgaTotalServed !== lgaCalhivServed + lgaHeiServed) {
+      validationErrors.push({
+        type: "LGA",
+        name: lgaName,
+        message: `Mathematical Discrepancy for LGA "${lgaName}": Total Served (${lgaTotalServed}) does not equal CALHIV Served (${lgaCalhivServed}) + HEI Served (${lgaHeiServed}).`
+      });
+    }
+    // 3. Outstanding = CMP - Total Served
     if (lgaOutstanding !== lgaCmp - lgaTotalServed) {
       validationErrors.push({
         type: "LGA",
@@ -225,11 +262,21 @@ export function calculateCCWPerformance(
         message: `Mathematical Discrepancy for LGA "${lgaName}": Outstanding (${lgaOutstanding}) does not equal CMP (${lgaCmp}) minus Total Served (${lgaTotalServed}).`
       });
     }
+    // 4. Total Served must never exceed CMP
     if (lgaTotalServed > lgaCmp) {
       validationErrors.push({
         type: "LGA",
         name: lgaName,
         message: `Inconsistent Data state for LGA "${lgaName}": Total Served (${lgaTotalServed}) exceeds Active CMP (${lgaCmp}).`
+      });
+    }
+    // 5. Served % = (Total Served / CMP) * 100
+    const expectedLgaServedPercent = lgaCmp > 0 ? Math.round((lgaTotalServed / lgaCmp) * 100) : 0;
+    if (lgaServedPercent !== expectedLgaServedPercent) {
+      validationErrors.push({
+        type: "LGA",
+        name: lgaName,
+        message: `Mathematical Discrepancy for LGA "${lgaName}": Served % (${lgaServedPercent}%) does not match expected percentage (${expectedLgaServedPercent}%).`
       });
     }
 
@@ -240,6 +287,7 @@ export function calculateCCWPerformance(
       hei: lgaHei,
       calhivServed: lgaCalhivServed,
       heiServed: lgaHeiServed,
+      totalServed: lgaTotalServed,
       servedPercent: lgaServedPercent,
       outstanding: lgaOutstanding,
       ccws
@@ -255,6 +303,7 @@ export function calculateCCWPerformance(
   let grandHei = 0;
   let grandCalhivServed = 0;
   let grandHeiServed = 0;
+  let grandTotalServed = 0;
 
   groups.forEach((g) => {
     grandCmp += g.cmp;
@@ -262,9 +311,9 @@ export function calculateCCWPerformance(
     grandHei += g.hei;
     grandCalhivServed += g.calhivServed;
     grandHeiServed += g.heiServed;
+    grandTotalServed += g.totalServed;
   });
 
-  const grandTotalServed = grandCalhivServed + grandHeiServed;
   const grandOutstanding = grandCmp - grandTotalServed;
   const grandServedPercent = grandCmp > 0 ? Math.round((grandTotalServed / grandCmp) * 100) : 0;
 
@@ -276,6 +325,7 @@ export function calculateCCWPerformance(
       hei: grandHei,
       calhivServed: grandCalhivServed,
       heiServed: grandHeiServed,
+      totalServed: grandTotalServed,
       servedPercent: grandServedPercent,
       outstanding: grandOutstanding
     },

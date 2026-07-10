@@ -264,6 +264,9 @@ export default function ReportsView({
         } else if (sortColumn === "heiServed") {
           valA = a.heiServed;
           valB = b.heiServed;
+        } else if (sortColumn === "totalServed") {
+          valA = a.totalServed;
+          valB = b.totalServed;
         } else if (sortColumn === "servedPercent") {
           valA = a.servedPercent;
           valB = b.servedPercent;
@@ -302,6 +305,9 @@ export default function ReportsView({
           } else if (sortColumn === "heiServed") {
             valA = a.heiServed;
             valB = b.heiServed;
+          } else if (sortColumn === "totalServed") {
+            valA = a.totalServed;
+            valB = b.totalServed;
           } else if (sortColumn === "servedPercent") {
             valA = a.servedPercent;
             valB = b.servedPercent;
@@ -620,6 +626,7 @@ export default function ReportsView({
 
   // 1. Export to Excel (using pre-installed sheetjs / xlsx)
   const handleExportExcel = () => {
+    if (performanceData.validationErrors.length > 0) return;
     const wb = XLSX.utils.book_new();
     const rows: any[] = [];
 
@@ -631,12 +638,13 @@ export default function ReportsView({
 
     // Table Column Headers
     rows.push([
-      "LGA",
+      "LGA / CCW Name",
       "CMP",
       "CALHIV",
       "HEI",
       "CALHIV SERVED",
       "HEI SERVED",
+      "TOTAL SERVED",
       "SERVED %",
       "OUTSTANDING"
     ]);
@@ -651,6 +659,7 @@ export default function ReportsView({
         g.hei,
         g.calhivServed,
         g.heiServed,
+        g.totalServed,
         `${g.servedPercent}%`,
         g.outstanding
       ]);
@@ -664,6 +673,7 @@ export default function ReportsView({
           c.hei,
           c.calhivServed,
           c.heiServed,
+          c.totalServed,
           `${c.servedPercent}%`,
           c.outstanding
         ]);
@@ -679,6 +689,7 @@ export default function ReportsView({
       performanceData.overallTotal.hei,
       performanceData.overallTotal.calhivServed,
       performanceData.overallTotal.heiServed,
+      performanceData.overallTotal.totalServed,
       `${performanceData.overallTotal.servedPercent}%`,
       performanceData.overallTotal.outstanding
     ]);
@@ -693,6 +704,7 @@ export default function ReportsView({
       { wch: 10 }, // HEI
       { wch: 15 }, // CALHIV Served
       { wch: 15 }, // HEI Served
+      { wch: 15 }, // Total Served
       { wch: 12 }, // Served %
       { wch: 14 }  // Outstanding
     ];
@@ -701,21 +713,192 @@ export default function ReportsView({
     XLSX.writeFile(wb, `CCW_Monthly_Performance_Report_${filters.ReportingPeriod}.xlsx`);
   };
 
+  // Helper to replace oklch and oklab colors with HSL colors so html2canvas doesn't crash
+  const replaceOklchInCss = (cssText: string): string => {
+    const replaceFunc = (text: string, funcName: string): string => {
+      let result = "";
+      let i = 0;
+      const len = text.length;
+      const searchStr = funcName + "(";
+      const searchLen = searchStr.length;
+
+      while (i < len) {
+        const idx = text.indexOf(searchStr, i);
+        if (idx === -1) {
+          result += text.substring(i);
+          break;
+        }
+
+        // Add everything before the match
+        result += text.substring(i, idx);
+
+        // Find the balanced closing parenthesis
+        let parenCount = 1;
+        let j = idx + searchLen;
+        while (j < len && parenCount > 0) {
+          if (text[j] === "(") {
+            parenCount++;
+          } else if (text[j] === ")") {
+            parenCount--;
+          }
+          j++;
+        }
+
+        // Extract the exact contents of the function call (excluding the outer parens)
+        const inside = text.substring(idx + searchLen, j - 1);
+        
+        // Default fallback color (neutral gray)
+        let replacedColor = "rgb(120, 120, 120)";
+
+        if (funcName === "oklch") {
+          const match = inside.match(/^\s*([0-9.]+%?)\s+([0-9.]+)\s+([-+0-9.a-zdeg%]+)(?:\s*\/\s*([0-9.]+%?))?\s*$/i);
+          if (match) {
+            const [, l, c, h, a] = match;
+            let lightness = l;
+            if (!lightness.endsWith("%")) {
+              lightness = `${parseFloat(lightness) * 100}%`;
+            }
+            const chroma = parseFloat(c);
+            const saturation = `${Math.min(100, Math.max(0, (chroma / 0.4) * 100))}%`;
+            
+            let hue = parseFloat(h);
+            if (isNaN(hue)) {
+              hue = 0;
+            } else if (h.includes("rad")) {
+              hue = hue * (180 / Math.PI);
+            } else if (h.includes("turn")) {
+              hue = hue * 360;
+            }
+            hue = (hue % 360 + 360) % 360;
+
+            if (a) {
+              replacedColor = `hsla(${hue.toFixed(1)}, ${saturation}, ${lightness}, ${a})`;
+            } else {
+              replacedColor = `hsl(${hue.toFixed(1)}, ${saturation}, ${lightness})`;
+            }
+          }
+        } else if (funcName === "oklab") {
+          const match = inside.match(/^\s*([0-9.]+%?)\s+([-+0-9.]+)\s+([-+0-9.]+)(?:\s*\/\s*([0-9.]+%?))?\s*$/i);
+          if (match) {
+            const [, l, a_val, b_val, alpha] = match;
+            let lightness = l;
+            if (!lightness.endsWith("%")) {
+              lightness = `${parseFloat(lightness) * 100}%`;
+            }
+            const A = parseFloat(a_val);
+            const B = parseFloat(b_val);
+            
+            const chroma = Math.sqrt(A * A + B * B);
+            const hueRad = Math.atan2(B, A);
+            let hueDeg = hueRad * (180 / Math.PI);
+            hueDeg = (hueDeg % 360 + 360) % 360;
+
+            const saturation = `${Math.min(100, Math.max(0, (chroma / 0.4) * 100))}%`;
+
+            if (alpha) {
+              replacedColor = `hsla(${hueDeg.toFixed(1)}, ${saturation}, ${lightness}, ${alpha})`;
+            } else {
+              replacedColor = `hsl(${hueDeg.toFixed(1)}, ${saturation}, ${lightness})`;
+            }
+          }
+        }
+
+        result += replacedColor;
+        i = j;
+      }
+      return result;
+    };
+
+    let cleaned = replaceFunc(cssText, "oklch");
+    cleaned = replaceFunc(cleaned, "oklab");
+    return cleaned;
+  };
+
+  const prepareStylesheetsForHtml2Canvas = async () => {
+    const originalStyles: { element: HTMLElement; originalText?: string; wasDisabled?: boolean }[] = [];
+    const tempStyleElements: HTMLStyleElement[] = [];
+
+    // 1. Process <style> tags
+    const styleTags = Array.from(document.querySelectorAll("style"));
+    for (const style of styleTags) {
+      if (style.innerHTML.includes("oklch") || style.innerHTML.includes("oklab")) {
+        const originalText = style.innerHTML;
+        const cleanText = replaceOklchInCss(originalText);
+        originalStyles.push({ element: style, originalText });
+        style.innerHTML = cleanText;
+      }
+    }
+
+    // 2. Process <link> tags (same origin only)
+    const linkTags = Array.from(document.querySelectorAll('link[rel="stylesheet"]')) as HTMLLinkElement[];
+    for (const link of linkTags) {
+      try {
+        if (link.href) {
+          const url = new URL(link.href, window.location.href);
+          if (url.origin === window.location.origin) {
+            const response = await fetch(link.href);
+            const cssText = await response.text();
+            if (cssText.includes("oklch") || cssText.includes("oklab")) {
+              const cleanText = replaceOklchInCss(cssText);
+              const tempStyle = document.createElement("style");
+              tempStyle.setAttribute("data-temp-html2canvas", "true");
+              tempStyle.innerHTML = cleanText;
+              document.head.appendChild(tempStyle);
+              tempStyleElements.push(tempStyle);
+
+              originalStyles.push({ element: link, wasDisabled: link.disabled });
+              link.disabled = true;
+            }
+          }
+        }
+      } catch (e) {
+        console.warn("Could not process stylesheet link:", link.href, e);
+      }
+    }
+
+    return () => {
+      // Restore style tags
+      for (const item of originalStyles) {
+        if (item.element.tagName === "STYLE" && item.originalText !== undefined) {
+          item.element.innerHTML = item.originalText;
+        } else if (item.element.tagName === "LINK" && item.wasDisabled !== undefined) {
+          (item.element as HTMLLinkElement).disabled = item.wasDisabled;
+        }
+      }
+      // Remove temporary style elements
+      for (const temp of tempStyleElements) {
+        if (temp.parentNode) {
+          temp.parentNode.removeChild(temp);
+        }
+      }
+    };
+  };
+
   // 2. Export to PDF (using html2canvas & jspdf)
-  const handleExportPDF = () => {
+  const handleExportPDF = async () => {
+    if (performanceData.validationErrors.length > 0) return;
     const reportElem = document.getElementById("ccw-report-print-area");
     if (!reportElem) return;
 
-    html2canvas(reportElem, {
-      scale: 1.5,
-      useCORS: true,
-      logging: false,
-      backgroundColor: "#ffffff"
-    }).then(canvas => {
+    let restoreStylesheets: (() => void) | null = null;
+    try {
+      restoreStylesheets = await prepareStylesheetsForHtml2Canvas();
+    } catch (err) {
+      console.error("Failed to temporarily sanitize stylesheets for html2canvas", err);
+    }
+
+    try {
+      const canvas = await html2canvas(reportElem, {
+        scale: 1.5,
+        useCORS: true,
+        logging: false,
+        backgroundColor: "#ffffff"
+      });
+
       const imgData = canvas.toDataURL("image/png");
-      const pdf = new jsPDF("p", "mm", "a4");
-      const imgWidth = 210;
-      const pageHeight = 297;
+      const pdf = new jsPDF("l", "mm", "a4");
+      const imgWidth = 297;
+      const pageHeight = 210;
       const imgHeight = (canvas.height * imgWidth) / canvas.width;
       let heightLeft = imgHeight;
       let position = 0;
@@ -731,11 +914,19 @@ export default function ReportsView({
       }
 
       pdf.save(`CCW_Monthly_Performance_Report_${filters.ReportingPeriod}.pdf`);
-    });
+    } catch (error) {
+      console.error("PDF Export failed:", error);
+      alert("PDF Export failed due to a style parsing issue. Try using other export formats or print directly.");
+    } finally {
+      if (restoreStylesheets) {
+        restoreStylesheets();
+      }
+    }
   };
 
   // 3. Export to Word (Structured HTML wrapper)
   const handleExportWord = () => {
+    if (performanceData.validationErrors.length > 0) return;
     let wordHtml = `
       <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
       <head>
@@ -748,7 +939,7 @@ export default function ReportsView({
           td { border: 1px solid #cbd5e1; padding: 6px 8px; font-size: 11px; }
           .lga-total-row { background-color: #fef08a; font-weight: bold; font-size: 12px; border: 1px solid #b45309; }
           .grand-total-row { background-color: #e2e8f0; font-weight: bold; font-size: 12px; }
-          .text-right { text-align: right; }
+          .text-center { text-align: center; font-weight: bold; }
           .indent { padding-left: 15px; }
         </style>
       </head>
@@ -759,14 +950,15 @@ export default function ReportsView({
         <table>
           <thead>
             <tr>
-              <th>LGA</th>
-              <th class="text-right">CMP</th>
-              <th class="text-right">CALHIV</th>
-              <th class="text-right">HEI</th>
-              <th class="text-right">CALHIV SERVED</th>
-              <th class="text-right">HEI SERVED</th>
-              <th class="text-right">SERVED %</th>
-              <th class="text-right">OUTSTANDING</th>
+              <th>LGA / CCW Name</th>
+              <th class="text-center">CMP</th>
+              <th class="text-center">CALHIV</th>
+              <th class="text-center">HEI</th>
+              <th class="text-center">CALHIV SERVED</th>
+              <th class="text-center">HEI SERVED</th>
+              <th class="text-center">TOTAL SERVED</th>
+              <th class="text-center">SERVED %</th>
+              <th class="text-center">OUTSTANDING</th>
             </tr>
           </thead>
           <tbody>
@@ -776,13 +968,14 @@ export default function ReportsView({
       wordHtml += `
         <tr class="lga-total-row">
           <td>${g.lgaName.toUpperCase()} (LGA Total)</td>
-          <td class="text-right">${g.cmp.toLocaleString()}</td>
-          <td class="text-right">${g.calhiv.toLocaleString()}</td>
-          <td class="text-right">${g.hei.toLocaleString()}</td>
-          <td class="text-right">${g.calhivServed.toLocaleString()}</td>
-          <td class="text-right">${g.heiServed.toLocaleString()}</td>
-          <td class="text-right">${g.servedPercent}%</td>
-          <td class="text-right">${g.outstanding.toLocaleString()}</td>
+          <td class="text-center">${g.cmp.toLocaleString()}</td>
+          <td class="text-center">${g.calhiv.toLocaleString()}</td>
+          <td class="text-center">${g.hei.toLocaleString()}</td>
+          <td class="text-center">${g.calhivServed.toLocaleString()}</td>
+          <td class="text-center">${g.heiServed.toLocaleString()}</td>
+          <td class="text-center">${g.totalServed.toLocaleString()}</td>
+          <td class="text-center">${g.servedPercent}%</td>
+          <td class="text-center">${g.outstanding.toLocaleString()}</td>
         </tr>
       `;
 
@@ -790,13 +983,14 @@ export default function ReportsView({
         wordHtml += `
           <tr>
             <td class="indent">${c.ccwName}</td>
-            <td class="text-right">${c.cmp.toLocaleString()}</td>
-            <td class="text-right">${c.calhiv.toLocaleString()}</td>
-            <td class="text-right">${c.hei.toLocaleString()}</td>
-            <td class="text-right">${c.calhivServed.toLocaleString()}</td>
-            <td class="text-right">${c.heiServed.toLocaleString()}</td>
-            <td class="text-right">${c.servedPercent}%</td>
-            <td class="text-right">${c.outstanding.toLocaleString()}</td>
+            <td class="text-center">${c.cmp.toLocaleString()}</td>
+            <td class="text-center">${c.calhiv.toLocaleString()}</td>
+            <td class="text-center">${c.hei.toLocaleString()}</td>
+            <td class="text-center">${c.calhivServed.toLocaleString()}</td>
+            <td class="text-center">${c.heiServed.toLocaleString()}</td>
+            <td class="text-center">${c.totalServed.toLocaleString()}</td>
+            <td class="text-center">${c.servedPercent}%</td>
+            <td class="text-center">${c.outstanding.toLocaleString()}</td>
           </tr>
         `;
       });
@@ -805,13 +999,14 @@ export default function ReportsView({
     wordHtml += `
           <tr class="grand-total-row">
             <td>GRAND TOTAL</td>
-            <td class="text-right">${performanceData.overallTotal.cmp.toLocaleString()}</td>
-            <td class="text-right">${performanceData.overallTotal.calhiv.toLocaleString()}</td>
-            <td class="text-right">${performanceData.overallTotal.hei.toLocaleString()}</td>
-            <td class="text-right">${performanceData.overallTotal.calhivServed.toLocaleString()}</td>
-            <td class="text-right">${performanceData.overallTotal.heiServed.toLocaleString()}</td>
-            <td class="text-right">${performanceData.overallTotal.servedPercent}%</td>
-            <td class="text-right">${performanceData.overallTotal.outstanding.toLocaleString()}</td>
+            <td class="text-center">${performanceData.overallTotal.cmp.toLocaleString()}</td>
+            <td class="text-center">${performanceData.overallTotal.calhiv.toLocaleString()}</td>
+            <td class="text-center">${performanceData.overallTotal.hei.toLocaleString()}</td>
+            <td class="text-center">${performanceData.overallTotal.calhivServed.toLocaleString()}</td>
+            <td class="text-center">${performanceData.overallTotal.heiServed.toLocaleString()}</td>
+            <td class="text-center">${performanceData.overallTotal.totalServed.toLocaleString()}</td>
+            <td class="text-center">${performanceData.overallTotal.servedPercent}%</td>
+            <td class="text-center">${performanceData.overallTotal.outstanding.toLocaleString()}</td>
           </tr>
           </tbody>
         </table>
@@ -832,6 +1027,7 @@ export default function ReportsView({
 
   // 4. Export to PowerPoint (HTML slide briefing package)
   const handleExportPPT = () => {
+    if (performanceData.validationErrors.length > 0) return;
     let pptHtml = `
       <html>
       <head>
@@ -886,11 +1082,14 @@ export default function ReportsView({
             <thead>
               <tr>
                 <th>LGA</th>
-                <th>Active CMP</th>
+                <th>CMP</th>
+                <th>CALHIV</th>
+                <th>HEI</th>
                 <th>CALHIV Served</th>
                 <th>HEI Served</th>
+                <th>Total Served</th>
+                <th>Served %</th>
                 <th>Outstanding</th>
-                <th>Coverage %</th>
               </tr>
             </thead>
             <tbody>
@@ -901,10 +1100,13 @@ export default function ReportsView({
         <tr>
           <td class="highlight">${g.lgaName.toUpperCase()}</td>
           <td>${g.cmp.toLocaleString()}</td>
+          <td>${g.calhiv.toLocaleString()}</td>
+          <td>${g.hei.toLocaleString()}</td>
           <td>${g.calhivServed.toLocaleString()}</td>
           <td>${g.heiServed.toLocaleString()}</td>
-          <td>${g.outstanding.toLocaleString()}</td>
+          <td>${g.totalServed.toLocaleString()}</td>
           <td class="coverage-cell">${g.servedPercent}%</td>
+          <td>${g.outstanding.toLocaleString()}</td>
         </tr>
       `;
     });
@@ -1425,199 +1627,303 @@ export default function ReportsView({
         )}
 
         {/* Scrollable Table Container */}
-        <div className="flex-1 overflow-x-auto" id="ccw-report-print-area">
+        <div className="flex-1 overflow-x-auto bg-slate-50 flex flex-col" id="ccw-report-print-area">
           {activeReport === "ccw" ? (
-            /* CCW MONTHLY PERFORMANCE REPORT GROUPED TABLE LAYOUT */
-            <table className="w-full border-collapse text-left min-w-[800px] bg-white border border-slate-200">
-              <thead>
-                <tr className="bg-slate-100 border-b border-slate-300">
-                  <th
-                    onClick={() => handleSort("lga")}
-                    className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-3 py-3.5 cursor-pointer hover:bg-slate-200 transition-colors sticky left-0 bg-slate-100 z-10 border-r border-slate-200"
-                  >
-                    <div className="flex items-center gap-1">
-                      LGA
-                      {sortColumn === "lga" && (sortDirection === "asc" ? "▲" : "▼")}
-                    </div>
-                  </th>
-                  <th
-                    onClick={() => handleSort("cmp")}
-                    className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-3 py-3.5 text-right cursor-pointer hover:bg-slate-200 transition-colors"
-                  >
-                    <div className="flex items-center justify-end gap-1">
-                      CMP
-                      {sortColumn === "cmp" && (sortDirection === "asc" ? "▲" : "▼")}
-                    </div>
-                  </th>
-                  <th
-                    onClick={() => handleSort("calhiv")}
-                    className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-3 py-3.5 text-right cursor-pointer hover:bg-slate-200 transition-colors"
-                  >
-                    <div className="flex items-center justify-end gap-1">
-                      CALHIV
-                      {sortColumn === "calhiv" && (sortDirection === "asc" ? "▲" : "▼")}
-                    </div>
-                  </th>
-                  <th
-                    onClick={() => handleSort("hei")}
-                    className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-3 py-3.5 text-right cursor-pointer hover:bg-slate-200 transition-colors"
-                  >
-                    <div className="flex items-center justify-end gap-1">
-                      HEI
-                      {sortColumn === "hei" && (sortDirection === "asc" ? "▲" : "▼")}
-                    </div>
-                  </th>
-                  <th
-                    onClick={() => handleSort("calhivServed")}
-                    className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-3 py-3.5 text-right cursor-pointer hover:bg-slate-200 transition-colors"
-                  >
-                    <div className="flex items-center justify-end gap-1">
-                      CALHIV SERVED
-                      {sortColumn === "calhivServed" && (sortDirection === "asc" ? "▲" : "▼")}
-                    </div>
-                  </th>
-                  <th
-                    onClick={() => handleSort("heiServed")}
-                    className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-3 py-3.5 text-right cursor-pointer hover:bg-slate-200 transition-colors"
-                  >
-                    <div className="flex items-center justify-end gap-1">
-                      HEI SERVED
-                      {sortColumn === "heiServed" && (sortDirection === "asc" ? "▲" : "▼")}
-                    </div>
-                  </th>
-                  <th
-                    onClick={() => handleSort("servedPercent")}
-                    className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-3 py-3.5 text-right cursor-pointer hover:bg-slate-200 transition-colors"
-                  >
-                    <div className="flex items-center justify-end gap-1">
-                      SERVED %
-                      {sortColumn === "servedPercent" && (sortDirection === "asc" ? "▲" : "▼")}
-                    </div>
-                  </th>
-                  <th
-                    onClick={() => handleSort("outstanding")}
-                    className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-3 py-3.5 text-right cursor-pointer hover:bg-slate-200 transition-colors"
-                  >
-                    <div className="flex items-center justify-end gap-1">
-                      OUTSTANDING
-                      {sortColumn === "outstanding" && (sortDirection === "asc" ? "▲" : "▼")}
-                    </div>
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="text-xs font-semibold text-slate-700 divide-y divide-slate-150">
-                {sortedCcwGroups.length > 0 ? (
-                  sortedCcwGroups.map((group, gIdx) => (
-                    <React.Fragment key={gIdx}>
-                      
-                      {/* LGA SUMMARY ROW (Yellow/Gold, Bold, Large text, Drilldown click trigger) */}
-                      <tr
-                        onClick={() => handleLgaClick(group.lgaName)}
-                        className="bg-[#fef08a] hover:bg-yellow-200 text-yellow-950 font-extrabold text-xs transition-colors cursor-pointer border-y border-amber-300"
-                        title="Click to drilldown Community Performance for this LGA"
+            performanceData.validationErrors.length > 0 ? (
+              <div className="flex-1 flex flex-col items-center justify-center p-8 bg-slate-50 text-center select-none">
+                <div className="max-w-2xl bg-white p-6 rounded-lg border border-red-200 shadow-xs flex flex-col items-center my-6">
+                  <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center mb-4">
+                    <AlertTriangle className="w-6 h-6 text-red-600 animate-pulse" />
+                  </div>
+                  <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider mb-2">
+                    Report Generation Blocked: M&E Validation Failure
+                  </h3>
+                  <p className="text-xs text-slate-600 mb-4 leading-relaxed max-w-lg">
+                    This report could not be compiled because the uploaded data contains mathematical discrepancies that violate strict monitoring and evaluation (M&E) rules. Please locate and rectify the source data for the following entities:
+                  </p>
+                  <div className="w-full text-left max-h-[220px] overflow-y-auto border border-red-200 bg-red-50/50 p-3 rounded font-mono text-[11px] text-red-800 divide-y divide-red-100">
+                    {performanceData.validationErrors.map((err, idx) => (
+                      <div key={idx} className="py-1.5 first:pt-0 last:pb-0 flex items-start gap-2">
+                        <span className="text-red-500 font-bold shrink-0">⚠️</span>
+                        <div>
+                          <span className="font-extrabold">[{err.type}] {err.name}</span>
+                          {err.parentLga && <span> (LGA: {err.parentLga})</span>}: {err.message}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-4 p-3 bg-slate-50 rounded border border-slate-200 text-left text-[11px] text-slate-500 space-y-1">
+                    <span className="font-bold text-slate-700 block mb-1">Audit Equations Enforced:</span>
+                    <div>• <span className="font-semibold text-slate-600">CMP</span> must equal <span className="font-semibold text-slate-600">CALHIV + HEI</span></div>
+                    <div>• <span className="font-semibold text-slate-600">Total Served</span> must equal <span className="font-semibold text-slate-600">CALHIV Served + HEI Served</span></div>
+                    <div>• <span className="font-semibold text-slate-600">Outstanding</span> must equal <span className="font-semibold text-slate-600">CMP - Total Served</span></div>
+                    <div>• <span className="font-semibold text-slate-600">Total Served</span> must not exceed <span className="font-semibold text-slate-600">CMP</span></div>
+                    <div>• <span className="font-semibold text-slate-600">Served %</span> must equal <span className="font-semibold text-slate-600">(Total Served / CMP) * 100</span></div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              /* CCW MONTHLY PERFORMANCE REPORT GROUPED TABLE LAYOUT WITH PROFESSIONAL MANAGEMENT REPORT LAYOUT */
+              <div className="w-[940px] min-w-[940px] mx-auto bg-white p-6 my-4 shadow-md border-4 border-black flex flex-col font-sans" style={{ boxSizing: "border-box" }}>
+                {/* Report Title & Subtitle */}
+                <div className="mb-6 pb-4 border-b-4 border-black flex flex-col items-center text-center">
+                  <h1 className="text-[24px] font-bold text-black uppercase tracking-wide leading-tight" style={{ fontSize: "24px", fontWeight: "bold", color: "#000000", margin: 0 }}>
+                    CCW Monthly Performance Report
+                  </h1>
+                  <h2 className="text-[18px] font-bold text-black mt-2 tracking-normal" style={{ fontSize: "18px", fontWeight: "bold", color: "#000000", margin: "8px 0 0 0" }}>
+                    CMP Analytics & Performance Reporting System — {filters.ReportingPeriod}
+                  </h2>
+                </div>
+
+                {/* Main Table */}
+                <table className="w-[892px] min-w-[892px] max-w-[892px] border-collapse text-left bg-white border-4 border-black" style={{ width: "892px", minWidth: "892px", maxWidth: "892px", border: "4px solid #000000", borderCollapse: "collapse" }}>
+                  <colgroup>
+                    <col style={{ width: "220px", minWidth: "220px", maxWidth: "220px" }} />
+                    <col style={{ width: "70px", minWidth: "70px", maxWidth: "70px" }} />
+                    <col style={{ width: "80px", minWidth: "80px", maxWidth: "80px" }} />
+                    <col style={{ width: "70px", minWidth: "70px", maxWidth: "70px" }} />
+                    <col style={{ width: "95px", minWidth: "95px", maxWidth: "95px" }} />
+                    <col style={{ width: "95px", minWidth: "95px", maxWidth: "95px" }} />
+                    <col style={{ width: "95px", minWidth: "95px", maxWidth: "95px" }} />
+                    <col style={{ width: "80px", minWidth: "80px", maxWidth: "80px" }} />
+                    <col style={{ width: "95px", minWidth: "95px", maxWidth: "95px" }} />
+                  </colgroup>
+                  <thead>
+                    <tr className="bg-slate-900 text-white font-bold" style={{ backgroundColor: "#0f172a" }}>
+                      <th
+                        onClick={() => handleSort("lga")}
+                        className="text-[16px] font-bold text-white uppercase px-3 py-3 cursor-pointer bg-slate-900 sticky left-0 top-0 z-30 border-r border-slate-700 text-left"
+                        style={{ width: "220px", minWidth: "220px", maxWidth: "220px", height: "44px", color: "#ffffff", backgroundColor: "#0f172a", fontSize: "16px", fontWeight: "bold", border: "1px solid #334155" }}
                       >
-                        <td className="px-3 py-3.5 font-extrabold sticky left-0 bg-[#fef08a] hover:bg-yellow-200 z-10 border-r border-amber-200 uppercase tracking-wide">
-                          ⭐ {group.lgaName} (LGA Total)
-                        </td>
-                        <td className="px-3 py-3.5 text-right font-mono font-bold">
-                          {group.cmp.toLocaleString()}
-                        </td>
-                        <td className="px-3 py-3.5 text-right font-mono font-bold">
-                          {group.calhiv.toLocaleString()}
-                        </td>
-                        <td className="px-3 py-3.5 text-right font-mono font-bold">
-                          {group.hei.toLocaleString()}
-                        </td>
-                        <td className="px-3 py-3.5 text-right font-mono font-bold">
-                          {group.calhivServed.toLocaleString()}
-                        </td>
-                        <td className="px-3 py-3.5 text-right font-mono font-bold">
-                          {group.heiServed.toLocaleString()}
-                        </td>
-                        <td className="px-3 py-3.5 text-right font-mono font-bold text-blue-800">
-                          {group.servedPercent}%
-                        </td>
-                        <td className="px-3 py-3.5 text-right font-mono font-bold text-red-700">
-                          {group.outstanding.toLocaleString()}
+                        <div className="flex items-center gap-1">
+                          CCW Name / LGA
+                          {sortColumn === "lga" && (sortDirection === "asc" ? "▲" : "▼")}
+                        </div>
+                      </th>
+                      <th
+                        onClick={() => handleSort("cmp")}
+                        className="text-[16px] font-bold text-white uppercase px-3 py-3 text-center cursor-pointer bg-slate-900 sticky top-0 z-20 border-r border-slate-700"
+                        style={{ width: "70px", minWidth: "70px", maxWidth: "70px", height: "44px", color: "#ffffff", backgroundColor: "#0f172a", fontSize: "16px", fontWeight: "bold", border: "1px solid #334155" }}
+                      >
+                        <div className="flex items-center justify-center gap-1">
+                          CMP
+                          {sortColumn === "cmp" && (sortDirection === "asc" ? "▲" : "▼")}
+                        </div>
+                      </th>
+                      <th
+                        onClick={() => handleSort("calhiv")}
+                        className="text-[16px] font-bold text-white uppercase px-3 py-3 text-center cursor-pointer bg-slate-900 sticky top-0 z-20 border-r border-slate-700"
+                        style={{ width: "80px", minWidth: "80px", maxWidth: "80px", height: "44px", color: "#ffffff", backgroundColor: "#0f172a", fontSize: "16px", fontWeight: "bold", border: "1px solid #334155" }}
+                      >
+                        <div className="flex items-center justify-center gap-1">
+                          CALHIV
+                          {sortColumn === "calhiv" && (sortDirection === "asc" ? "▲" : "▼")}
+                        </div>
+                      </th>
+                      <th
+                        onClick={() => handleSort("hei")}
+                        className="text-[16px] font-bold text-white uppercase px-3 py-3 text-center cursor-pointer bg-slate-900 sticky top-0 z-20 border-r border-slate-700"
+                        style={{ width: "70px", minWidth: "70px", maxWidth: "70px", height: "44px", color: "#ffffff", backgroundColor: "#0f172a", fontSize: "16px", fontWeight: "bold", border: "1px solid #334155" }}
+                      >
+                        <div className="flex items-center justify-center gap-1">
+                          HEI
+                          {sortColumn === "hei" && (sortDirection === "asc" ? "▲" : "▼")}
+                        </div>
+                      </th>
+                      <th
+                        onClick={() => handleSort("calhivServed")}
+                        className="text-[16px] font-bold text-white uppercase px-3 py-3 text-center cursor-pointer bg-slate-900 sticky top-0 z-20 border-r border-slate-700"
+                        style={{ width: "95px", minWidth: "95px", maxWidth: "95px", height: "44px", color: "#ffffff", backgroundColor: "#0f172a", fontSize: "16px", fontWeight: "bold", border: "1px solid #334155" }}
+                      >
+                        <div className="flex items-center justify-center gap-1">
+                          CALHIV SERVED
+                          {sortColumn === "calhivServed" && (sortDirection === "asc" ? "▲" : "▼")}
+                        </div>
+                      </th>
+                      <th
+                        onClick={() => handleSort("heiServed")}
+                        className="text-[16px] font-bold text-white uppercase px-3 py-3 text-center cursor-pointer bg-slate-900 sticky top-0 z-20 border-r border-slate-700"
+                        style={{ width: "95px", minWidth: "95px", maxWidth: "95px", height: "44px", color: "#ffffff", backgroundColor: "#0f172a", fontSize: "16px", fontWeight: "bold", border: "1px solid #334155" }}
+                      >
+                        <div className="flex items-center justify-center gap-1">
+                          HEI SERVED
+                          {sortColumn === "heiServed" && (sortDirection === "asc" ? "▲" : "▼")}
+                        </div>
+                      </th>
+                      <th
+                        onClick={() => handleSort("totalServed" as any)}
+                        className="text-[16px] font-bold text-white uppercase px-3 py-3 text-center cursor-pointer bg-slate-900 sticky top-0 z-20 border-r border-slate-700"
+                        style={{ width: "95px", minWidth: "95px", maxWidth: "95px", height: "44px", color: "#ffffff", backgroundColor: "#0f172a", fontSize: "16px", fontWeight: "bold", border: "1px solid #334155" }}
+                      >
+                        <div className="flex items-center justify-center gap-1">
+                          TOTAL SERVED
+                          {sortColumn === "totalServed" && (sortDirection === "asc" ? "▲" : "▼")}
+                        </div>
+                      </th>
+                      <th
+                        onClick={() => handleSort("servedPercent")}
+                        className="text-[16px] font-bold text-white uppercase px-3 py-3 text-center cursor-pointer bg-slate-900 sticky top-0 z-20 border-r border-slate-700"
+                        style={{ width: "80px", minWidth: "80px", maxWidth: "80px", height: "44px", color: "#ffffff", backgroundColor: "#0f172a", fontSize: "16px", fontWeight: "bold", border: "1px solid #334155" }}
+                      >
+                        <div className="flex items-center justify-center gap-1">
+                          SERVED %
+                          {sortColumn === "servedPercent" && (sortDirection === "asc" ? "▲" : "▼")}
+                        </div>
+                      </th>
+                      <th
+                        onClick={() => handleSort("outstanding")}
+                        className="text-[16px] font-bold text-white uppercase px-3 py-3 text-center cursor-pointer bg-slate-900 sticky top-0 z-20"
+                        style={{ width: "95px", minWidth: "95px", maxWidth: "95px", height: "44px", color: "#ffffff", backgroundColor: "#0f172a", fontSize: "16px", fontWeight: "bold", border: "1px solid #334155" }}
+                      >
+                        <div className="flex items-center justify-center gap-1">
+                          OUTSTANDING
+                          {sortColumn === "outstanding" && (sortDirection === "asc" ? "▲" : "▼")}
+                        </div>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-300">
+                    {sortedCcwGroups.length > 0 ? (
+                      sortedCcwGroups.map((group, gIdx) => (
+                        <React.Fragment key={gIdx}>
+                          
+                          {/* LGA SUMMARY ROW (Yellow/Gold, Extra-Bold, 16px text, Drilldown click trigger) */}
+                          <tr
+                            onClick={() => handleLgaClick(group.lgaName)}
+                            className="bg-[#fef08a] hover:bg-yellow-200 transition-colors cursor-pointer"
+                            title="Click to drilldown Community Performance for this LGA"
+                            style={{ backgroundColor: "#fef08a", borderTop: "2.5px solid #000000", borderBottom: "2.5px solid #000000" }}
+                          >
+                            <td 
+                              className="px-3 py-3 font-extrabold sticky left-0 bg-[#fef08a] hover:bg-yellow-200 z-10 uppercase tracking-wide text-left"
+                              style={{ padding: "12px 10px", height: "44px", color: "#000000", fontSize: "16px", fontWeight: "800", width: "220px", minWidth: "220px", maxWidth: "220px", borderRight: "1px solid #b45309" }}
+                            >
+                              ⭐ {group.lgaName} (LGA Total)
+                            </td>
+                            <td className="px-3 py-3 text-center font-bold text-black" style={{ padding: "12px 10px", height: "44px", color: "#000000", fontSize: "16px", fontWeight: "800", borderRight: "1px solid #cbd5e1" }}>
+                              {group.cmp.toLocaleString()}
+                            </td>
+                            <td className="px-3 py-3 text-center font-bold text-black" style={{ padding: "12px 10px", height: "44px", color: "#000000", fontSize: "16px", fontWeight: "800", borderRight: "1px solid #cbd5e1" }}>
+                              {group.calhiv.toLocaleString()}
+                            </td>
+                            <td className="px-3 py-3 text-center font-bold text-black" style={{ padding: "12px 10px", height: "44px", color: "#000000", fontSize: "16px", fontWeight: "800", borderRight: "1px solid #cbd5e1" }}>
+                              {group.hei.toLocaleString()}
+                            </td>
+                            <td className="px-3 py-3 text-center font-bold text-black" style={{ padding: "12px 10px", height: "44px", color: "#000000", fontSize: "16px", fontWeight: "800", borderRight: "1px solid #cbd5e1" }}>
+                              {group.calhivServed.toLocaleString()}
+                            </td>
+                            <td className="px-3 py-3 text-center font-bold text-black" style={{ padding: "12px 10px", height: "44px", color: "#000000", fontSize: "16px", fontWeight: "800", borderRight: "1px solid #cbd5e1" }}>
+                              {group.heiServed.toLocaleString()}
+                            </td>
+                            <td className="px-3 py-3 text-center font-bold text-black" style={{ padding: "12px 10px", height: "44px", color: "#000000", fontSize: "16px", fontWeight: "800", borderRight: "1px solid #cbd5e1" }}>
+                              {group.totalServed.toLocaleString()}
+                            </td>
+                            <td className="px-3 py-3 text-center font-bold text-black" style={{ padding: "12px 10px", height: "44px", color: "#000000", fontSize: "16px", fontWeight: "800", borderRight: "1px solid #cbd5e1" }}>
+                              {group.servedPercent}%
+                            </td>
+                            <td className="px-3 py-3 text-center font-bold text-black" style={{ padding: "12px 10px", height: "44px", color: "#000000", fontSize: "16px", fontWeight: "800" }}>
+                              {group.outstanding.toLocaleString()}
+                            </td>
+                          </tr>
+
+                          {/* INDIVIDUAL alphabetically-sorted CCWs under this LGA */}
+                          {group.ccws.map((ccw, cIdx) => (
+                            <tr
+                              key={cIdx}
+                              onClick={() => setSelectedCcwForDetails(ccw)}
+                              className="bg-white hover:bg-slate-50 transition-colors cursor-pointer text-black"
+                              title={`Click to view ${ccw.ccwName}'s active beneficiary list`}
+                              style={{ height: "44px" }}
+                            >
+                              <td 
+                                className="px-3 py-3 font-bold pl-8 sticky left-0 bg-inherit hover:bg-slate-50 z-10 text-left"
+                                style={{ padding: "12px 10px 12px 32px", height: "44px", color: "#000000", fontSize: "15px", fontWeight: "bold", width: "220px", minWidth: "220px", maxWidth: "220px", borderRight: "1px solid #cbd5e1" }}
+                              >
+                                {ccw.ccwName}
+                              </td>
+                              <td className="px-3 py-3 text-center font-bold text-black" style={{ padding: "12px 10px", height: "44px", color: "#000000", fontSize: "15px", fontWeight: "bold", borderRight: "1px solid #cbd5e1" }}>
+                                {ccw.cmp.toLocaleString()}
+                              </td>
+                              <td className="px-3 py-3 text-center font-bold text-black" style={{ padding: "12px 10px", height: "44px", color: "#000000", fontSize: "15px", fontWeight: "bold", borderRight: "1px solid #cbd5e1" }}>
+                                {ccw.calhiv.toLocaleString()}
+                              </td>
+                              <td className="px-3 py-3 text-center font-bold text-black" style={{ padding: "12px 10px", height: "44px", color: "#000000", fontSize: "15px", fontWeight: "bold", borderRight: "1px solid #cbd5e1" }}>
+                                {ccw.hei.toLocaleString()}
+                              </td>
+                              <td className="px-3 py-3 text-center font-bold text-black" style={{ padding: "12px 10px", height: "44px", color: "#000000", fontSize: "15px", fontWeight: "bold", borderRight: "1px solid #cbd5e1" }}>
+                                {ccw.calhivServed.toLocaleString()}
+                              </td>
+                              <td className="px-3 py-3 text-center font-bold text-black" style={{ padding: "12px 10px", height: "44px", color: "#000000", fontSize: "15px", fontWeight: "bold", borderRight: "1px solid #cbd5e1" }}>
+                                {ccw.heiServed.toLocaleString()}
+                              </td>
+                              <td className="px-3 py-3 text-center font-bold text-black" style={{ padding: "12px 10px", height: "44px", color: "#000000", fontSize: "15px", fontWeight: "bold", borderRight: "1px solid #cbd5e1" }}>
+                                {ccw.totalServed.toLocaleString()}
+                              </td>
+                              <td className="px-3 py-3 text-center font-bold text-black" style={{ padding: "12px 10px", height: "44px", color: "#000000", fontSize: "15px", fontWeight: "bold", borderRight: "1px solid #cbd5e1" }}>
+                                {ccw.servedPercent}%
+                              </td>
+                              <td className="px-3 py-3 text-center font-bold text-black" style={{ padding: "12px 10px", height: "44px", color: "#000000", fontSize: "15px", fontWeight: "bold" }}>
+                                {ccw.outstanding.toLocaleString()}
+                              </td>
+                            </tr>
+                          ))}
+
+                        </React.Fragment>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={9} className="text-center py-16 text-slate-500 font-bold text-[15px]" style={{ color: "#000000" }}>
+                          No active CCW performance records match your search criteria. Try removing or resetting filters.
                         </td>
                       </tr>
+                    )}
 
-                      {/* INDIVIDUAL alphabetically-sorted CCWs under this LGA */}
-                      {group.ccws.map((ccw, cIdx) => (
-                        <tr
-                          key={cIdx}
-                          onClick={() => setSelectedCcwForDetails(ccw)}
-                          className="bg-white hover:bg-slate-50 transition-colors cursor-pointer text-[11px] text-slate-600"
-                          title={`Click to view ${ccw.ccwName}'s active beneficiary list`}
+                    {/* GRAND TOTAL ROW */}
+                    {sortedCcwGroups.length > 0 && (
+                      <tr className="bg-slate-200 text-black font-extrabold text-[16px]" style={{ backgroundColor: "#e2e8f0", borderTop: "4px solid #000000", height: "44px" }}>
+                        <td 
+                          className="px-3 py-3 font-extrabold sticky left-0 bg-[#e2e8f0] z-10 uppercase text-left text-black"
+                          style={{ padding: "12px 10px", height: "44px", color: "#000000", fontSize: "16px", fontWeight: "800", width: "220px", minWidth: "220px", maxWidth: "220px", borderRight: "1px solid #94a3b8" }}
                         >
-                          <td className="px-3 py-2.5 font-medium pl-8 sticky left-0 bg-inherit hover:bg-slate-50 z-10 border-r border-slate-150 text-slate-800">
-                            {ccw.ccwName}
-                          </td>
-                          <td className="px-3 py-2.5 text-right font-mono font-medium">
-                            {ccw.cmp.toLocaleString()}
-                          </td>
-                          <td className="px-3 py-2.5 text-right font-mono font-medium">
-                            {ccw.calhiv.toLocaleString()}
-                          </td>
-                          <td className="px-3 py-2.5 text-right font-mono font-medium">
-                            {ccw.hei.toLocaleString()}
-                          </td>
-                          <td className="px-3 py-2.5 text-right font-mono font-medium text-blue-600/90">
-                            {ccw.calhivServed.toLocaleString()}
-                          </td>
-                          <td className="px-3 py-2.5 text-right font-mono font-medium text-emerald-600/90">
-                            {ccw.heiServed.toLocaleString()}
-                          </td>
-                          <td className="px-3 py-2.5 text-right font-mono font-bold text-slate-700">
-                            {ccw.servedPercent}%
-                          </td>
-                          <td className="px-3 py-2.5 text-right font-mono font-semibold text-red-500">
-                            {ccw.outstanding.toLocaleString()}
-                          </td>
-                        </tr>
-                      ))}
+                          GRAND TOTAL
+                        </td>
+                        <td className="px-3 py-3 text-center font-bold text-black" style={{ padding: "12px 10px", height: "44px", color: "#000000", fontSize: "16px", fontWeight: "800", borderRight: "1px solid #cbd5e1" }}>
+                          {performanceData.overallTotal.cmp.toLocaleString()}
+                        </td>
+                        <td className="px-3 py-3 text-center font-bold text-black" style={{ padding: "12px 10px", height: "44px", color: "#000000", fontSize: "16px", fontWeight: "800", borderRight: "1px solid #cbd5e1" }}>
+                          {performanceData.overallTotal.calhiv.toLocaleString()}
+                        </td>
+                        <td className="px-3 py-3 text-center font-bold text-black" style={{ padding: "12px 10px", height: "44px", color: "#000000", fontSize: "16px", fontWeight: "800", borderRight: "1px solid #cbd5e1" }}>
+                          {performanceData.overallTotal.hei.toLocaleString()}
+                        </td>
+                        <td className="px-3 py-3 text-center font-bold text-black" style={{ padding: "12px 10px", height: "44px", color: "#000000", fontSize: "16px", fontWeight: "800", borderRight: "1px solid #cbd5e1" }}>
+                          {performanceData.overallTotal.calhivServed.toLocaleString()}
+                        </td>
+                        <td className="px-3 py-3 text-center font-bold text-black" style={{ padding: "12px 10px", height: "44px", color: "#000000", fontSize: "16px", fontWeight: "800", borderRight: "1px solid #cbd5e1" }}>
+                          {performanceData.overallTotal.heiServed.toLocaleString()}
+                        </td>
+                        <td className="px-3 py-3 text-center font-bold text-black" style={{ padding: "12px 10px", height: "44px", color: "#000000", fontSize: "16px", fontWeight: "800", borderRight: "1px solid #cbd5e1" }}>
+                          {performanceData.overallTotal.totalServed.toLocaleString()}
+                        </td>
+                        <td className="px-3 py-3 text-center font-bold text-black" style={{ padding: "12px 10px", height: "44px", color: "#000000", fontSize: "16px", fontWeight: "800", borderRight: "1px solid #cbd5e1" }}>
+                          {performanceData.overallTotal.servedPercent}%
+                        </td>
+                        <td className="px-3 py-3 text-center font-bold text-black" style={{ padding: "12px 10px", height: "44px", color: "#000000", fontSize: "16px", fontWeight: "800" }}>
+                          {performanceData.overallTotal.outstanding.toLocaleString()}
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
 
-                    </React.Fragment>
-                  ))
-                ) : (
-                  <tr>
-                    <td colSpan={8} className="text-center py-16 text-slate-400 font-normal">
-                      No active CCW performance records match your search criteria. Try removing or resetting filters.
-                    </td>
-                  </tr>
-                )}
-
-                {/* GRAND TOTAL ROW */}
-                {sortedCcwGroups.length > 0 && (
-                  <tr className="bg-slate-200 border-t-2 border-slate-400 text-slate-900 font-black text-xs">
-                    <td className="px-3 py-3.5 font-black sticky left-0 bg-slate-200 z-10 border-r border-slate-300 uppercase">
-                      GRAND TOTAL
-                    </td>
-                    <td className="px-3 py-3.5 text-right font-mono font-black">
-                      {performanceData.overallTotal.cmp.toLocaleString()}
-                    </td>
-                    <td className="px-3 py-3.5 text-right font-mono font-black">
-                      {performanceData.overallTotal.calhiv.toLocaleString()}
-                    </td>
-                    <td className="px-3 py-3.5 text-right font-mono font-black">
-                      {performanceData.overallTotal.hei.toLocaleString()}
-                    </td>
-                    <td className="px-3 py-3.5 text-right font-mono font-black">
-                      {performanceData.overallTotal.calhivServed.toLocaleString()}
-                    </td>
-                    <td className="px-3 py-3.5 text-right font-mono font-black">
-                      {performanceData.overallTotal.heiServed.toLocaleString()}
-                    </td>
-                    <td className="px-3 py-3.5 text-right font-mono font-black text-blue-900">
-                      {performanceData.overallTotal.servedPercent}%
-                    </td>
-                    <td className="px-3 py-3.5 text-right font-mono font-black text-red-800">
-                      {performanceData.overallTotal.outstanding.toLocaleString()}
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+                {/* PDF Print Footer */}
+                <div className="w-[892px] mt-6 pt-4 border-t-4 border-black flex items-center justify-between text-black text-[12px] font-bold" style={{ width: "892px", fontSize: "12px", fontWeight: "bold", color: "#000000" }}>
+                  <span>CAPRS — CCW Monthly Performance Report</span>
+                  <span>Reporting Period: {filters.ReportingPeriod}</span>
+                  <span>Generated on: {new Date().toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })}</span>
+                </div>
+              </div>
+            )
           ) : (
             /* STANDARD TABLE RENDERER FOR OTHER ANALYTICS REPORTS */
             <table className="w-full text-left border-collapse min-w-[700px]">

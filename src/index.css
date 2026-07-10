@@ -11,12 +11,15 @@
   }
 
   #print-preview-container,
-  #print-preview-container * {
+  #print-preview-container *,
+  #ccw-report-print-area,
+  #ccw-report-print-area * {
     visibility: visible;
   }
 
   /* Position print container at top left */
-  #print-preview-container {
+  #print-preview-container,
+  #ccw-report-print-area {
     position: absolute;
     left: 0;
     top: 0;
