@@ -541,6 +541,8 @@ export default function App() {
                       validation={reportResults.validation}
                       selectedPeriod={filters.ReportingPeriod}
                       beneficiaries={beneficiaries}
+                      filters={filters}
+                      targetDate={targetDate}
                     />
                   )}
 
