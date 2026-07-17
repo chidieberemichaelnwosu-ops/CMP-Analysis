@@ -57,7 +57,8 @@ const INITIAL_FILTERS: ReportFilters = {
   EnrolmentStream: "All",
   ReportingPeriod: ReportingPeriod.MONTHLY,
   StartDate: "",
-  EndDate: ""
+  EndDate: "",
+  CurrentHIVStatus: ""
 };
 
 export default function App() {
@@ -172,7 +173,11 @@ export default function App() {
       )
     ).sort();
 
-    return { states, lgas, wards, communities, ccws };
+    const hivStatuses = Array.from(
+      new Set(list.map((b) => b.CurrentHIVStatus).filter(Boolean))
+    ).sort();
+
+    return { states, lgas, wards, communities, ccws, hivStatuses };
   }, [beneficiaries, filters.State, filters.LGA, filters.Ward, filters.Community]);
 
   // Debug Logging Effect for verification
@@ -468,6 +473,55 @@ export default function App() {
                     <option value="CALHIV">CALHIV Only</option>
                     <option value="HEI">HEI Only</option>
                   </select>
+                </div>
+
+                {/* Current HIV Status */}
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 mb-1">Current HIV Status</label>
+                  <select
+                    value={filters.CurrentHIVStatus}
+                    onChange={(e) => setFilters({ ...filters, CurrentHIVStatus: e.target.value })}
+                    className="w-full bg-white border border-slate-300 text-xs rounded p-1 focus:ring-1 focus:ring-blue-500 outline-none"
+                  >
+                    <option value="">All HIV Statuses</option>
+                    {filterOptions.hivStatuses.map((hs, idx) => (
+                      <option key={idx} value={hs}>{hs}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Age Filter */}
+                <div className="grid grid-cols-2 gap-1.5">
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 mb-1">Min Age (Yrs)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={filters.AgeMin === null ? "" : filters.AgeMin}
+                      onChange={(e) => {
+                        const val = e.target.value === "" ? null : parseInt(e.target.value);
+                        setFilters({ ...filters, AgeMin: val });
+                      }}
+                      className="w-full bg-white border border-slate-300 text-xs rounded p-1 focus:ring-1 focus:ring-blue-500 outline-none"
+                      placeholder="Min"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 mb-1">Max Age (Yrs)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={filters.AgeMax === null ? "" : filters.AgeMax}
+                      onChange={(e) => {
+                        const val = e.target.value === "" ? null : parseInt(e.target.value);
+                        setFilters({ ...filters, AgeMax: val });
+                      }}
+                      className="w-full bg-white border border-slate-300 text-xs rounded p-1 focus:ring-1 focus:ring-blue-500 outline-none"
+                      placeholder="Max"
+                    />
+                  </div>
                 </div>
 
                 {/* Reporting Period */}

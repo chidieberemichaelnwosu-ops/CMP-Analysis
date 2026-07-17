@@ -27,6 +27,7 @@ export function runSuite(): TestCaseResult[] {
     Sex: "",
     AgeMin: null,
     AgeMax: null,
+    CurrentHIVStatus: "",
     OVCStatus: "Active",
     EnrolmentStream: "All",
     ReportingPeriod: ReportingPeriod.MONTHLY,

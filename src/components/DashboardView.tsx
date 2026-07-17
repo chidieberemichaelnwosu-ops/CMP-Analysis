@@ -34,6 +34,10 @@ import TuberculosisDashboard, {
   isCompletedTPT
 } from "./TuberculosisDashboard";
 import ClinicalDrilldownModal from "./ClinicalDrilldownModal";
+import IITDashboard from "./IITDashboard";
+import NewlyEnrolledDashboard from "./NewlyEnrolledDashboard";
+import ClinicalAlertsDashboard from "./ClinicalAlertsDashboard";
+import { calculateClinicalAlerts } from "../utils/clinicalAlertsEngine";
 
 interface DashboardViewProps {
   ccwRecords: CCWCounter[];
@@ -61,13 +65,27 @@ export default function DashboardView({
   filters,
   targetDate
 }: DashboardViewProps) {
-  const [activeSubTab, setActiveSubTab] = useState<"overview" | "nutrition" | "tuberculosis">("overview");
+  const [activeSubTab, setActiveSubTab] = useState<"overview" | "nutrition" | "tuberculosis" | "iit" | "newly_enrolled" | "alerts">("overview");
 
   // Drilldown Modal State
   const [drilldown, setDrilldown] = useState<{
     isOpen: boolean;
     title: string;
-    type: "nutrition" | "tb" | "general";
+    type:
+      | "nutrition"
+      | "tb"
+      | "general"
+      | "no_bmi"
+      | "viral_load_sample"
+      | "viral_load_result"
+      | "viral_load_date"
+      | "unsuppressed"
+      | "drug_pickup"
+      | "appointment"
+      | "iit"
+      | "sam"
+      | "mam"
+      | "presumptive_tb";
     list: Beneficiary[];
   } | null>(null);
 
@@ -171,7 +189,25 @@ export default function DashboardView({
   }, [filteredBeneficiaries]);
 
   // Handle drilling down
-  const handleDrilldown = (title: string, list: Beneficiary[], type: "nutrition" | "tb" | "general") => {
+  const handleDrilldown = (
+    title: string,
+    list: Beneficiary[],
+    type:
+      | "nutrition"
+      | "tb"
+      | "general"
+      | "no_bmi"
+      | "viral_load_sample"
+      | "viral_load_result"
+      | "viral_load_date"
+      | "unsuppressed"
+      | "drug_pickup"
+      | "appointment"
+      | "iit"
+      | "sam"
+      | "mam"
+      | "presumptive_tb"
+  ) => {
     setDrilldown({
       isOpen: true,
       title,
@@ -179,6 +215,15 @@ export default function DashboardView({
       list
     });
   };
+
+  const iitThreshold = useMemo(() => {
+    const saved = localStorage.getItem("caprs_iit_threshold_days");
+    return saved ? parseInt(saved, 10) : 28;
+  }, []);
+
+  const alertsSummary = useMemo(() => {
+    return calculateClinicalAlerts(filteredBeneficiaries, filters, targetDate, iitThreshold).summary;
+  }, [filteredBeneficiaries, filters, targetDate, iitThreshold]);
 
   if (isMissingColumns) {
     return (
@@ -231,7 +276,7 @@ export default function DashboardView({
     <div className="space-y-6" id="dashboard-view-root">
       
       {/* Sub navigation bar for Clinical Cohorts */}
-      <div className="flex border-b border-slate-200 bg-white p-1 rounded-t shadow-xs gap-1.5" id="clinical-sub-tabs">
+      <div className="flex flex-wrap border-b border-slate-200 bg-white p-1 rounded-t shadow-xs gap-1.5" id="clinical-sub-tabs">
         <button
           onClick={() => setActiveSubTab("overview")}
           className={`flex items-center gap-2 font-bold uppercase text-xs px-4 py-2.5 rounded transition-all cursor-pointer ${
@@ -265,15 +310,85 @@ export default function DashboardView({
           <Heart className="w-4 h-4 text-rose-400 animate-pulse" />
           Tuberculosis Monitoring
         </button>
+        <button
+          onClick={() => setActiveSubTab("iit")}
+          className={`flex items-center gap-2 font-bold uppercase text-xs px-4 py-2.5 rounded transition-all cursor-pointer ${
+            activeSubTab === "iit"
+              ? "bg-blue-600 text-white shadow-xs"
+              : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
+          }`}
+        >
+          <AlertTriangle className="w-4 h-4 text-red-500 animate-pulse" />
+          IIT (Interruption)
+        </button>
+        <button
+          onClick={() => setActiveSubTab("newly_enrolled")}
+          className={`flex items-center gap-2 font-bold uppercase text-xs px-4 py-2.5 rounded transition-all cursor-pointer ${
+            activeSubTab === "newly_enrolled"
+              ? "bg-blue-600 text-white shadow-xs"
+              : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
+          }`}
+        >
+          <Users className="w-4 h-4 text-sky-400" />
+          Newly Enrolled
+        </button>
+        <button
+          onClick={() => setActiveSubTab("alerts")}
+          className={`flex items-center gap-2 font-bold uppercase text-xs px-4 py-2.5 rounded transition-all cursor-pointer ${
+            activeSubTab === "alerts"
+              ? "bg-rose-600 text-white shadow-xs"
+              : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
+          }`}
+        >
+          <AlertOctagon className="w-4 h-4 text-white" />
+          Clinical Alerts & Data Quality
+        </button>
       </div>
 
       {/* Render selected Dashboard Tab */}
       {activeSubTab === "nutrition" && (
-        <NutritionDashboard filteredBeneficiaries={filteredBeneficiaries} onDrilldown={handleDrilldown} />
+        <NutritionDashboard
+          filteredBeneficiaries={filteredBeneficiaries}
+          onDrilldown={handleDrilldown}
+          filters={filters}
+          targetDate={targetDate}
+        />
       )}
 
       {activeSubTab === "tuberculosis" && (
-        <TuberculosisDashboard filteredBeneficiaries={filteredBeneficiaries} onDrilldown={handleDrilldown} />
+        <TuberculosisDashboard
+          filteredBeneficiaries={filteredBeneficiaries}
+          onDrilldown={handleDrilldown}
+          filters={filters}
+          targetDate={targetDate}
+        />
+      )}
+
+      {activeSubTab === "iit" && (
+        <IITDashboard
+          filteredBeneficiaries={filteredBeneficiaries}
+          filters={filters}
+          targetDate={targetDate}
+          onDrilldown={handleDrilldown}
+        />
+      )}
+
+      {activeSubTab === "newly_enrolled" && (
+        <NewlyEnrolledDashboard
+          filteredBeneficiaries={filteredBeneficiaries}
+          filters={filters}
+          targetDate={targetDate}
+          onDrilldown={handleDrilldown}
+        />
+      )}
+
+      {activeSubTab === "alerts" && (
+        <ClinicalAlertsDashboard
+          filteredBeneficiaries={filteredBeneficiaries}
+          filters={filters}
+          targetDate={targetDate}
+          onDrilldown={handleDrilldown}
+        />
       )}
 
       {activeSubTab === "overview" && (
@@ -438,135 +553,74 @@ export default function DashboardView({
             </div>
           </div>
 
-          {/* At-Risk Beneficiaries Panel (Dashboard Alerts) */}
-          <div className="p-5 bg-white border border-slate-300 rounded shadow-xs space-y-4" id="at-risk-alerts">
-            <div className="flex items-center gap-2 border-b border-slate-200 pb-2.5">
-              <AlertTriangle className="w-4 h-4 text-rose-500 animate-pulse" />
-              <h3 className="font-bold uppercase text-slate-800 text-xs tracking-wider">
-                At-Risk Beneficiaries (Dashboard Alerts)
-              </h3>
+          {/* Clinical Alerts Summary Widget */}
+          <div className="p-5 bg-white border border-slate-300 rounded shadow-xs space-y-4 animate-fade-in" id="at-risk-alerts">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-2.5">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-rose-500 animate-pulse" />
+                <h3 className="font-bold uppercase text-slate-800 text-xs tracking-wider font-sans">
+                  Clinical Alerts & Data Quality Monitoring Summary
+                </h3>
+              </div>
+              <button
+                onClick={() => setActiveSubTab("alerts")}
+                className="text-[10px] bg-rose-50 text-rose-700 hover:bg-rose-100 font-bold border border-rose-200 px-2.5 py-1 rounded transition-colors cursor-pointer uppercase flex items-center gap-1 font-sans"
+              >
+                Go to Alerts Dashboard →
+              </button>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              
-              {/* Nutrition Alerts column */}
-              <div className="space-y-2.5">
-                <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Nutrition Alerts</h4>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+              {Object.entries(alertsSummary).map(([key, item]: [string, any]) => {
+                let drilldownType: any = "general";
+                if (key === "noBmi") drilldownType = "no_bmi";
+                else if (key === "missingVlSampleDate") drilldownType = "viral_load_sample";
+                else if (key === "missingVlResult") drilldownType = "viral_load_result";
+                else if (key === "missingDateOfVl") drilldownType = "viral_load_date";
+                else if (key === "unsuppressed") drilldownType = "unsuppressed";
+                else if (key === "missingDrugPickup") drilldownType = "drug_pickup";
+                else if (key === "missingNextAppointment") drilldownType = "appointment";
+                else if (key === "iit") drilldownType = "iit";
+                else if (key === "sam") drilldownType = "sam";
+                else if (key === "mam") drilldownType = "mam";
+                else if (key === "presumptiveTb") drilldownType = "presumptive_tb";
+
+                let borderStyle = "border-slate-200 hover:border-slate-300 bg-slate-50/30 text-slate-700";
+                let countColor = "text-slate-800";
+                let dotColor = "bg-slate-400";
                 
-                {/* SAM Alert */}
-                <div
-                  onClick={() => handleDrilldown("SAM Cases Requiring Urgent Action", clinicalLists.sam, "nutrition")}
-                  className={`flex items-center justify-between p-3 border rounded cursor-pointer transition-all hover:shadow-xs ${
-                    clinicalLists.sam.length > 0
-                      ? "bg-rose-50 border-rose-300 text-rose-900"
-                      : "bg-slate-50/50 border-slate-200 text-slate-400"
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <span className={`w-2 h-2 rounded-full ${clinicalLists.sam.length > 0 ? "bg-rose-600 animate-pulse" : "bg-slate-300"}`}></span>
-                    <span className="text-xs font-bold">Severe Acute Malnutrition (SAM)</span>
+                if (item.count > 0) {
+                  if (item.severity === "🔴") {
+                    borderStyle = "border-rose-300 hover:border-rose-400 bg-rose-50/20 text-rose-950 shadow-rose-50/50";
+                    countColor = "text-rose-700";
+                    dotColor = "bg-rose-600 animate-pulse";
+                  } else {
+                    borderStyle = "border-orange-300 hover:border-orange-400 bg-orange-50/20 text-orange-950 shadow-orange-50/50";
+                    countColor = "text-orange-600";
+                    dotColor = "bg-orange-500";
+                  }
+                } else {
+                  borderStyle = "border-emerald-200 hover:border-emerald-300 bg-emerald-50/20 text-emerald-950 shadow-emerald-50/50";
+                  countColor = "text-emerald-700";
+                  dotColor = "bg-emerald-500";
+                }
+
+                return (
+                  <div
+                    key={key}
+                    onClick={() => handleDrilldown(item.name, item.list, drilldownType)}
+                    className={`p-3 border rounded transition-all cursor-pointer hover:shadow-xs flex items-center justify-between gap-2 h-14 ${borderStyle}`}
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className={`w-2 h-2 rounded-full shrink-0 ${dotColor}`}></span>
+                      <span className="text-[11px] font-bold truncate leading-tight block">{item.name}</span>
+                    </div>
+                    <span className={`text-[11px] font-mono font-extrabold px-2 py-0.5 rounded-sm bg-white border border-slate-200/60 shrink-0 ${countColor}`}>
+                      {item.count}
+                    </span>
                   </div>
-                  <span className="text-xs font-bold bg-white px-2 py-0.5 rounded border border-rose-200">
-                    {clinicalLists.sam.length} red
-                  </span>
-                </div>
-
-                {/* MAM Alert */}
-                <div
-                  onClick={() => handleDrilldown("MAM Cases Requiring Nutrition Support", clinicalLists.mam, "nutrition")}
-                  className={`flex items-center justify-between p-3 border rounded cursor-pointer transition-all hover:shadow-xs ${
-                    clinicalLists.mam.length > 0
-                      ? "bg-orange-50 border-orange-200 text-orange-900"
-                      : "bg-slate-50/50 border-slate-200 text-slate-400"
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <span className={`w-2 h-2 rounded-full ${clinicalLists.mam.length > 0 ? "bg-orange-500" : "bg-slate-300"}`}></span>
-                    <span className="text-xs font-semibold">Moderate Acute Malnutrition (MAM)</span>
-                  </div>
-                  <span className="text-xs font-bold bg-white px-2 py-0.5 rounded border border-orange-200">
-                    {clinicalLists.mam.length} orange
-                  </span>
-                </div>
-
-                {/* Missing Assessments Alert */}
-                <div
-                  onClick={() => handleDrilldown("Missing Nutrition Assessments Follow-up", clinicalLists.missingNutrition, "nutrition")}
-                  className={`flex items-center justify-between p-3 border rounded cursor-pointer transition-all hover:shadow-xs ${
-                    clinicalLists.missingNutrition.length > 0
-                      ? "bg-amber-50 border-amber-200 text-amber-900"
-                      : "bg-slate-50/50 border-slate-200 text-slate-400"
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <span className={`w-2 h-2 rounded-full ${clinicalLists.missingNutrition.length > 0 ? "bg-amber-400" : "bg-slate-300"}`}></span>
-                    <span className="text-xs font-semibold">Missing Nutrition Assessments</span>
-                  </div>
-                  <span className="text-xs font-bold bg-white px-2 py-0.5 rounded border border-amber-200">
-                    {clinicalLists.missingNutrition.length} orange
-                  </span>
-                </div>
-              </div>
-
-              {/* TB Alerts column */}
-              <div className="space-y-2.5">
-                <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Tuberculosis Alerts</h4>
-
-                {/* Presumptive Awaiting Diagnosis */}
-                <div
-                  onClick={() => handleDrilldown("Presumptive TB Awaiting Diagnostic Results", clinicalLists.presumptiveNoDiag, "tb")}
-                  className={`flex items-center justify-between p-3 border rounded cursor-pointer transition-all hover:shadow-xs ${
-                    clinicalLists.presumptiveNoDiag.length > 0
-                      ? "bg-rose-50 border-rose-300 text-rose-900"
-                      : "bg-slate-50/50 border-slate-200 text-slate-400"
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <span className={`w-2 h-2 rounded-full ${clinicalLists.presumptiveNoDiag.length > 0 ? "bg-rose-600 animate-pulse" : "bg-slate-300"}`}></span>
-                    <span className="text-xs font-bold">Presumptive TB Awaiting Diagnosis</span>
-                  </div>
-                  <span className="text-xs font-bold bg-white px-2 py-0.5 rounded border border-rose-200">
-                    {clinicalLists.presumptiveNoDiag.length} red
-                  </span>
-                </div>
-
-                {/* TB positive not started TPT */}
-                <div
-                  onClick={() => handleDrilldown("Confirmed TB Cases Not Commenced TPT Prophylaxis", clinicalLists.confirmedNoTpt, "tb")}
-                  className={`flex items-center justify-between p-3 border rounded cursor-pointer transition-all hover:shadow-xs ${
-                    clinicalLists.confirmedNoTpt.length > 0
-                      ? "bg-rose-50 border-rose-300 text-rose-900"
-                      : "bg-slate-50/50 border-slate-200 text-slate-400"
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <span className={`w-2 h-2 rounded-full ${clinicalLists.confirmedNoTpt.length > 0 ? "bg-rose-600 animate-pulse" : "bg-slate-300"}`}></span>
-                    <span className="text-xs font-bold">TB Positive (No TPT Started)</span>
-                  </div>
-                  <span className="text-xs font-bold bg-white px-2 py-0.5 rounded border border-rose-200">
-                    {clinicalLists.confirmedNoTpt.length} red
-                  </span>
-                </div>
-
-                {/* Started TPT not completed */}
-                <div
-                  onClick={() => handleDrilldown("Started TPT but Course Incomplete", clinicalLists.tptStartedNotCompleted, "tb")}
-                  className={`flex items-center justify-between p-3 border rounded cursor-pointer transition-all hover:shadow-xs ${
-                    clinicalLists.tptStartedNotCompleted.length > 0
-                      ? "bg-orange-50 border-orange-200 text-orange-900"
-                      : "bg-slate-50/50 border-slate-200 text-slate-400"
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <span className={`w-2 h-2 rounded-full ${clinicalLists.tptStartedNotCompleted.length > 0 ? "bg-orange-500" : "bg-slate-300"}`}></span>
-                    <span className="text-xs font-semibold">Started TPT (Incomplete Course)</span>
-                  </div>
-                  <span className="text-xs font-bold bg-white px-2 py-0.5 rounded border border-orange-200">
-                    {clinicalLists.tptStartedNotCompleted.length} orange
-                  </span>
-                </div>
-              </div>
-
+                );
+              })}
             </div>
           </div>
 

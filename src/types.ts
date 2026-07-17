@@ -132,6 +132,7 @@ export interface ReportFilters {
   ReportingPeriod: ReportingPeriod;
   StartDate: string; // YYYY-MM-DD
   EndDate: string; // YYYY-MM-DD
+  CurrentHIVStatus: string; // All or specific status
 }
 
 export interface DQIssue {

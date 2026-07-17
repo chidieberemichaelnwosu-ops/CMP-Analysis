@@ -11,13 +11,37 @@ import html2canvas from "html2canvas";
 import { prepareStylesheetsForHtml2Canvas } from "../utils/cssSanitizer";
 import { Beneficiary } from "../types";
 import { parseDate } from "../utils/reportingEngine";
+import { calculateDaysOverdue, getIITFollowUpAction } from "../utils/clinicalAlertsEngine";
+
+export type DrilldownType =
+  | "nutrition"
+  | "tb"
+  | "general"
+  | "no_bmi"
+  | "viral_load_sample"
+  | "viral_load_result"
+  | "viral_load_date"
+  | "unsuppressed"
+  | "drug_pickup"
+  | "appointment"
+  | "iit"
+  | "sam"
+  | "mam"
+  | "presumptive_tb";
 
 interface ClinicalDrilldownModalProps {
   isOpen: boolean;
   title: string;
-  type: "nutrition" | "tb" | "general";
+  type: DrilldownType;
   beneficiaries: Beneficiary[];
   onClose: () => void;
+  targetDate?: Date; // Added targetDate as optional parameter to correctly parse days overdue
+}
+
+interface TableColumn {
+  key: string;
+  label: string;
+  sortable?: boolean;
 }
 
 export default function ClinicalDrilldownModal({
@@ -25,7 +49,8 @@ export default function ClinicalDrilldownModal({
   title,
   type,
   beneficiaries,
-  onClose
+  onClose,
+  targetDate = new Date(2026, 5, 15) // Default fallback
 }: ClinicalDrilldownModalProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [genderFilter, setGenderFilter] = useState("All");
@@ -46,7 +71,128 @@ export default function ClinicalDrilldownModal({
     return Array.from(lgas).sort();
   }, [beneficiaries]);
 
-  // 2. Search, Sort, and Filter logic
+  // 2. Select columns based on drilldown type
+  const columns = useMemo<TableColumn[]>(() => {
+    const baseCols: TableColumn[] = [
+      { key: "id", label: "VC Unique ID", sortable: true },
+      { key: "name", label: "Child Name", sortable: true },
+      { key: "age", label: "Age", sortable: true },
+      { key: "sex", label: "Sex", sortable: true },
+      { key: "community", label: "Community" },
+      { key: "lga", label: "LGA", sortable: true },
+      { key: "ccw", label: "CCW Name", sortable: true }
+    ];
+
+    switch (type) {
+      case "no_bmi":
+        return [
+          ...baseCols,
+          { key: "weight", label: "Weight" },
+          { key: "height", label: "Height" },
+          { key: "bmi", label: "BMI" },
+          { key: "nutrition", label: "Nutrition Status", sortable: true },
+          { key: "services", label: "Latest Services" },
+          { key: "serviceDate", label: "Latest Service Date", sortable: true },
+          { key: "caregiver", label: "Caregiver Name" },
+          { key: "phone", label: "Caregiver Phone" }
+        ];
+      case "viral_load_sample":
+        return [
+          ...baseCols,
+          { key: "art_status", label: "Current ART Status" },
+          { key: "vl_sample_date", label: "VL Sample Date" },
+          { key: "caregiver", label: "Caregiver Name" },
+          { key: "phone", label: "Caregiver Phone" }
+        ];
+      case "viral_load_result":
+        return [
+          ...baseCols,
+          { key: "vl_carried_out", label: "VL Carried Out" },
+          { key: "vl_result", label: "VL Result" },
+          { key: "caregiver", label: "Caregiver Name" },
+          { key: "phone", label: "Caregiver Phone" }
+        ];
+      case "viral_load_date":
+        return [
+          ...baseCols,
+          { key: "vl_carried_out", label: "VL Carried Out" },
+          { key: "vl_date", label: "Date of VL" },
+          { key: "caregiver", label: "Caregiver Name" },
+          { key: "phone", label: "Caregiver Phone" }
+        ];
+      case "unsuppressed":
+        return [
+          ...baseCols,
+          { key: "vl_result", label: "Last VL Result" },
+          { key: "vl_date", label: "Date of VL" },
+          { key: "art_status", label: "Current ART Status" },
+          { key: "commenced_eac", label: "Commenced EAC" },
+          { key: "completed_eac", label: "EAC Status" },
+          { key: "caregiver", label: "Caregiver Name" },
+          { key: "phone", label: "Caregiver Phone" }
+        ];
+      case "drug_pickup":
+        return [
+          ...baseCols,
+          { key: "last_drug_pickup", label: "Last Drug Pickup" },
+          { key: "caregiver", label: "Caregiver Name" },
+          { key: "phone", label: "Caregiver Phone" }
+        ];
+      case "appointment":
+        return [
+          ...baseCols,
+          { key: "next_appointment", label: "Next Appointment Date" },
+          { key: "caregiver", label: "Caregiver Name" },
+          { key: "phone", label: "Caregiver Phone" }
+        ];
+      case "iit":
+        return [
+          ...baseCols,
+          { key: "last_drug_pickup", label: "Last Drug Pickup" },
+          { key: "next_appointment", label: "Next Appointment" },
+          { key: "art_status", label: "ART Status" },
+          { key: "days_overdue", label: "Days Overdue", sortable: true },
+          { key: "recommended_action", label: "Recommended Follow-up Action" },
+          { key: "caregiver", label: "Caregiver Name" },
+          { key: "phone", label: "Caregiver Phone" }
+        ];
+      case "nutrition":
+      case "sam":
+      case "mam":
+        return [
+          ...baseCols,
+          { key: "weight", label: "Weight" },
+          { key: "height", label: "Height" },
+          { key: "bmi", label: "BMI" },
+          { key: "nutrition", label: "Nutrition Status", sortable: true },
+          { key: "serviceDate", label: "Latest Service Date", sortable: true },
+          { key: "caregiver", label: "Caregiver Name" },
+          { key: "phone", label: "Caregiver Phone" }
+        ];
+      case "tb":
+      case "presumptive_tb":
+        return [
+          ...baseCols,
+          { key: "tb_outcome", label: "TB Screening" },
+          { key: "tb_referred", label: "Referred" },
+          { key: "tb_detected", label: "TB Detected" },
+          { key: "cad_score", label: "CAD Score" },
+          { key: "cad_date", label: "CAD Date" },
+          { key: "tpt_eligible", label: "TPT Eligible" },
+          { key: "services", label: "Latest Services" },
+          { key: "serviceDate", label: "Latest Service", sortable: true },
+          { key: "caregiver", label: "Caregiver Name" },
+          { key: "phone", label: "Caregiver Phone" }
+        ];
+      default:
+        return [
+          ...baseCols,
+          { key: "serviceDate", label: "Latest Service", sortable: true }
+        ];
+    }
+  }, [type]);
+
+  // 3. Search, Sort, and Filter logic
   const filteredList = useMemo(() => {
     return beneficiaries.filter((b) => {
       const name = (b.ChildName || "").toLowerCase();
@@ -108,6 +254,10 @@ export default function ClinicalDrilldownModal({
           valA = a.NutritionStatus || "";
           valB = b.NutritionStatus || "";
           break;
+        case "days_overdue":
+          valA = calculateDaysOverdue(a, targetDate);
+          valB = calculateDaysOverdue(b, targetDate);
+          break;
         case "serviceDate":
           valA = parseDate(a.DateOfLatestServiceProvided)?.getTime() || 0;
           valB = parseDate(b.DateOfLatestServiceProvided)?.getTime() || 0;
@@ -122,7 +272,7 @@ export default function ClinicalDrilldownModal({
       return 0;
     });
     return list;
-  }, [filteredList, sortField, sortDirection]);
+  }, [filteredList, sortField, sortDirection, targetDate]);
 
   // Pagination
   const paginatedList = useMemo(() => {
@@ -142,88 +292,86 @@ export default function ClinicalDrilldownModal({
     setCurrentPage(1);
   };
 
-  // 3. Export functions
+  // 4. Resolve Value for specific cell
+  const getCellValue = (b: Beneficiary, key: string) => {
+    switch (key) {
+      case "id":
+        return b.VCUniqueID || "N/A";
+      case "name":
+        return b.ChildName || "Anonymous";
+      case "age":
+        return b.Age ?? "-";
+      case "sex":
+        return b.Sex || "-";
+      case "community":
+        return b.Community || "Unknown";
+      case "lga":
+        return b.LGA || "Unknown";
+      case "ccw":
+        return b.CCWName || "Unassigned";
+      case "weight":
+        return b.Weight !== null ? `${b.Weight} kg` : "-";
+      case "height":
+        return b.Height !== null ? `${b.Height} cm` : "-";
+      case "bmi":
+        return b.BMI !== null ? b.BMI.toFixed(1) : "-";
+      case "nutrition":
+        return b.NutritionStatus || "Not Assessed";
+      case "services":
+        return b.LatestServicesProvided || "-";
+      case "serviceDate":
+        return b.DateOfLatestServiceProvided || "-";
+      case "caregiver":
+        return b.CaregiverName || "-";
+      case "phone":
+        return b.CaregiverPhone || "-";
+      case "art_status":
+        return b.CurrentARTStatus || "-";
+      case "vl_sample_date":
+        return b.VLSampleCollectionDate || "Missing";
+      case "vl_carried_out":
+        return b.VLCarriedOut || "No";
+      case "vl_result":
+        return b.VLResult || "Missing";
+      case "vl_date":
+        return b.DateofVL || "Missing";
+      case "commenced_eac":
+        return b.CommencedonEAC || "No";
+      case "completed_eac":
+        return b.CompletedEAC || "No";
+      case "last_drug_pickup":
+        return b.LastDrugPickup || "Missing";
+      case "next_appointment":
+        return b.NextAppointmentDate || "Missing";
+      case "days_overdue":
+        return `${calculateDaysOverdue(b, targetDate)} Days`;
+      case "recommended_action":
+        return getIITFollowUpAction(b, calculateDaysOverdue(b, targetDate));
+      case "tb_outcome":
+        return b.TBScreeningOutcome || "Not Screened";
+      case "tb_referred":
+        return b.ReferredforTBDiagnosis || "No";
+      case "tb_detected":
+        return b.TBDetected || "No";
+      case "cad_score":
+        return b.CADScore ?? "-";
+      case "cad_date":
+        return b.CADScoreDate || "-";
+      case "tpt_eligible":
+        return b.EligibleforTBTPT || "No";
+      default:
+        return "-";
+    }
+  };
+
+  // 5. Export functions
   const handleExportCSV = () => {
-    const headers =
-      type === "nutrition"
-        ? [
-            "VC Unique ID",
-            "Child Name",
-            "Age",
-            "Sex",
-            "Community",
-            "LGA",
-            "CCW Name",
-            "Weight",
-            "Height",
-            "BMI",
-            "Nutrition Status",
-            "Date of Latest Service Provided",
-            "Caregiver Name",
-            "Caregiver Phone"
-          ]
-        : [
-            "VC Unique ID",
-            "Child Name",
-            "Age",
-            "Sex",
-            "Community",
-            "Ward",
-            "LGA",
-            "CCW Name",
-            "TB Screening Outcome",
-            "Referred for TB Diagnosis",
-            "TB Detected",
-            "CAD Score",
-            "CAD Score Date",
-            "Eligible for TPT",
-            "Latest Services Provided",
-            "Date of Latest Service Provided",
-            "Caregiver Name",
-            "Caregiver Phone"
-          ];
-
+    const headers = columns.map((col) => col.label);
     const csvRows = sortedList.map((b) => {
-      const fields =
-        type === "nutrition"
-          ? [
-              b.VCUniqueID,
-              b.ChildName,
-              b.Age,
-              b.Sex,
-              b.Community,
-              b.LGA,
-              b.CCWName,
-              b.Weight,
-              b.Height,
-              b.BMI,
-              b.NutritionStatus,
-              b.DateOfLatestServiceProvided,
-              b.CaregiverName,
-              b.CaregiverPhone
-            ]
-          : [
-              b.VCUniqueID,
-              b.ChildName,
-              b.Age,
-              b.Sex,
-              b.Community,
-              b.Ward,
-              b.LGA,
-              b.CCWName,
-              b.TBScreeningOutcome,
-              b.ReferredforTBDiagnosis,
-              b.TBDetected,
-              b.CADScore,
-              b.CADScoreDate,
-              b.EligibleforTBTPT,
-              b.LatestServicesProvided,
-              b.DateOfLatestServiceProvided,
-              b.CaregiverName,
-              b.CaregiverPhone
-            ];
-
-      return fields.map((v) => `"${String(v || "").replace(/"/g, '""')}"`).join(",");
+      return columns.map((col) => {
+        const val = getCellValue(b, col.key);
+        return `"${String(val).replace(/"/g, '""')}"`;
+      }).join(",");
     });
 
     const csvContent = [headers.join(","), ...csvRows].join("\n");
@@ -237,54 +385,20 @@ export default function ClinicalDrilldownModal({
 
   const handleExportExcel = () => {
     const dataToExport = sortedList.map((b) => {
-      if (type === "nutrition") {
-        return {
-          "VC Unique ID": b.VCUniqueID || "",
-          "Child Name": b.ChildName || "",
-          "Age": b.Age || 0,
-          "Sex": b.Sex || "",
-          "Community": b.Community || "",
-          "LGA": b.LGA || "",
-          "CCW Name": b.CCWName || "",
-          "Weight (kg)": b.Weight || "",
-          "Height (cm)": b.Height || "",
-          "BMI": b.BMI || "",
-          "Nutrition Status": b.NutritionStatus || "",
-          "Date of Latest Service": b.DateOfLatestServiceProvided || "",
-          "Caregiver Name": b.CaregiverName || "",
-          "Caregiver Phone": b.CaregiverPhone || ""
-        };
-      } else {
-        return {
-          "VC Unique ID": b.VCUniqueID || "",
-          "Child Name": b.ChildName || "",
-          "Age": b.Age || 0,
-          "Sex": b.Sex || "",
-          "Community": b.Community || "",
-          "Ward": b.Ward || "",
-          "LGA": b.LGA || "",
-          "CCW Name": b.CCWName || "",
-          "TB Screening Outcome": b.TBScreeningOutcome || "",
-          "Referred for TB Diagnosis": b.ReferredforTBDiagnosis || "",
-          "TB Detected": b.TBDetected || "",
-          "CAD Score": b.CADScore || "",
-          "CAD Score Date": b.CADScoreDate || "",
-          "Eligible for TPT": b.EligibleforTBTPT || "",
-          "Latest Services Provided": b.LatestServicesProvided || "",
-          "Date of Latest Service": b.DateOfLatestServiceProvided || "",
-          "Caregiver Name": b.CaregiverName || "",
-          "Caregiver Phone": b.CaregiverPhone || ""
-        };
-      }
+      const row: Record<string, any> = {};
+      columns.forEach((col) => {
+        row[col.label] = getCellValue(b, col.key);
+      });
+      return row;
     });
 
     const worksheet = XLSX.utils.json_to_sheet(dataToExport);
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Beneficiaries");
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Alert Details");
 
     if (dataToExport.length > 0) {
       const maxCols = Object.keys(dataToExport[0]).length;
-      worksheet["!cols"] = Array(maxCols).fill({ wch: 18 });
+      worksheet["!cols"] = Array(maxCols).fill({ wch: 20 });
     }
 
     XLSX.writeFile(workbook, `${title.replace(/\s+/g, "_")}.xlsx`);
@@ -293,7 +407,7 @@ export default function ClinicalDrilldownModal({
   const handleExportPDF = async () => {
     const element = document.getElementById("drilldown-table-capture");
     if (!element) return;
-    
+
     let restoreStylesheets: (() => void) | null = null;
     try {
       restoreStylesheets = await prepareStylesheetsForHtml2Canvas();
@@ -340,7 +454,7 @@ export default function ClinicalDrilldownModal({
     <>
       {/* 1. Modal overlay view */}
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 overflow-y-auto">
-        <div className="bg-white w-full max-w-6xl rounded-lg shadow-2xl flex flex-col max-h-[90vh]">
+        <div className="bg-white w-full max-w-7xl rounded-lg shadow-2xl flex flex-col max-h-[90vh]">
           {/* Header */}
           <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
             <div>
@@ -451,74 +565,18 @@ export default function ClinicalDrilldownModal({
               <table className="w-full text-left border-collapse text-xs">
                 <thead>
                   <tr className="bg-slate-100 border-b border-slate-200">
-                    <th
-                      onClick={() => toggleSort("id")}
-                      className="p-3 font-bold text-slate-700 cursor-pointer hover:bg-slate-200 select-none"
-                    >
-                      VC Unique ID {sortField === "id" && (sortDirection === "asc" ? "▲" : "▼")}
-                    </th>
-                    <th
-                      onClick={() => toggleSort("name")}
-                      className="p-3 font-bold text-slate-700 cursor-pointer hover:bg-slate-200 select-none"
-                    >
-                      Child Name {sortField === "name" && (sortDirection === "asc" ? "▲" : "▼")}
-                    </th>
-                    <th
-                      onClick={() => toggleSort("age")}
-                      className="p-3 font-bold text-slate-700 cursor-pointer hover:bg-slate-200 select-none"
-                    >
-                      Age {sortField === "age" && (sortDirection === "asc" ? "▲" : "▼")}
-                    </th>
-                    <th
-                      onClick={() => toggleSort("sex")}
-                      className="p-3 font-bold text-slate-700 cursor-pointer hover:bg-slate-200 select-none"
-                    >
-                      Sex {sortField === "sex" && (sortDirection === "asc" ? "▲" : "▼")}
-                    </th>
-                    <th className="p-3 font-bold text-slate-700">Community</th>
-                    {type === "tb" && <th className="p-3 font-bold text-slate-700">Ward</th>}
-                    <th
-                      onClick={() => toggleSort("lga")}
-                      className="p-3 font-bold text-slate-700 cursor-pointer hover:bg-slate-200 select-none"
-                    >
-                      LGA {sortField === "lga" && (sortDirection === "asc" ? "▲" : "▼")}
-                    </th>
-                    <th
-                      onClick={() => toggleSort("ccw")}
-                      className="p-3 font-bold text-slate-700 cursor-pointer hover:bg-slate-200 select-none"
-                    >
-                      CCW Name {sortField === "ccw" && (sortDirection === "asc" ? "▲" : "▼")}
-                    </th>
-
-                    {type === "nutrition" ? (
-                      <>
-                        <th className="p-3 font-bold text-slate-700">Weight (kg)</th>
-                        <th className="p-3 font-bold text-slate-700">Height (cm)</th>
-                        <th className="p-3 font-bold text-slate-700">BMI</th>
-                        <th
-                          onClick={() => toggleSort("nutrition")}
-                          className="p-3 font-bold text-slate-700 cursor-pointer hover:bg-slate-200 select-none"
-                        >
-                          Nutrition Status {sortField === "nutrition" && (sortDirection === "asc" ? "▲" : "▼")}
-                        </th>
-                      </>
-                    ) : (
-                      <>
-                        <th className="p-3 font-bold text-slate-700 text-[10px]">TB Screening</th>
-                        <th className="p-3 font-bold text-slate-700 text-[10px]">Referred</th>
-                        <th className="p-3 font-bold text-slate-700 text-[10px]">TB Detected</th>
-                        <th className="p-3 font-bold text-slate-700 text-[10px]">CAD Score</th>
-                        <th className="p-3 font-bold text-slate-700 text-[10px]">CAD Date</th>
-                        <th className="p-3 font-bold text-slate-700 text-[10px]">TPT Eligible</th>
-                      </>
-                    )}
-
-                    <th
-                      onClick={() => toggleSort("serviceDate")}
-                      className="p-3 font-bold text-slate-700 cursor-pointer hover:bg-slate-200 select-none text-right"
-                    >
-                      Latest Service {sortField === "serviceDate" && (sortDirection === "asc" ? "▲" : "▼")}
-                    </th>
+                    {columns.map((col) => (
+                      <th
+                        key={col.key}
+                        onClick={() => col.sortable && toggleSort(col.key)}
+                        className={`p-3 font-bold text-slate-700 select-none ${
+                          col.sortable ? "cursor-pointer hover:bg-slate-200" : ""
+                        }`}
+                      >
+                        {col.label}{" "}
+                        {col.sortable && sortField === col.key && (sortDirection === "asc" ? "▲" : "▼")}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
@@ -530,76 +588,58 @@ export default function ClinicalDrilldownModal({
                           idx % 2 === 1 ? "bg-slate-50/50" : ""
                         }`}
                       >
-                        <td className="p-3 font-semibold text-slate-800 font-mono text-[11px]">
-                          {b.VCUniqueID || "N/A"}
-                        </td>
-                        <td className="p-3 font-bold text-slate-950">{b.ChildName || "Anonymous"}</td>
-                        <td className="p-3 font-medium text-slate-600">{b.Age}</td>
-                        <td className="p-3 font-medium text-slate-600">{b.Sex}</td>
-                        <td className="p-3 text-slate-600 truncate max-w-[120px]">{b.Community || "Unknown"}</td>
-                        {type === "tb" && <td className="p-3 text-slate-600">{b.Ward || "Unknown"}</td>}
-                        <td className="p-3 text-slate-600 font-semibold">{b.LGA || "Unknown"}</td>
-                        <td className="p-3 text-slate-600 truncate max-w-[120px]">{b.CCWName || "Unassigned"}</td>
-
-                        {type === "nutrition" ? (
-                          <>
-                            <td className="p-3 font-medium text-slate-800 font-mono">{b.Weight || "-"}</td>
-                            <td className="p-3 font-medium text-slate-800 font-mono">{b.Height || "-"}</td>
-                            <td className="p-3 font-bold text-slate-800 font-mono">{b.BMI || "-"}</td>
-                            <td className="p-3">
-                              <span
-                                className={`px-2 py-0.5 rounded-full font-bold text-[10px] uppercase border ${
-                                  (b.NutritionStatus || "").toUpperCase().includes("SAM") ||
-                                  (b.NutritionStatus || "").toUpperCase().includes("SEVERE")
-                                    ? "bg-rose-100 text-rose-800 border-rose-300"
-                                    : (b.NutritionStatus || "").toUpperCase().includes("MAM") ||
-                                      (b.NutritionStatus || "").toUpperCase().includes("MODERATE")
-                                    ? "bg-orange-100 text-orange-800 border-orange-300"
-                                    : (b.NutritionStatus || "").toUpperCase().includes("MILD")
-                                    ? "bg-amber-100 text-amber-800 border-amber-300"
-                                    : (b.NutritionStatus || "").toUpperCase().includes("NORMAL")
-                                    ? "bg-emerald-100 text-emerald-800 border-emerald-300"
-                                    : "bg-slate-100 text-slate-600 border-slate-300"
-                                }`}
-                              >
-                                {b.NutritionStatus || "Not Assessed"}
-                              </span>
-                            </td>
-                          </>
-                        ) : (
-                          <>
-                            <td className="p-3 font-medium text-slate-600 text-[11px]">
-                              {b.TBScreeningOutcome || "Not Screened"}
-                            </td>
-                            <td className="p-3 font-semibold text-slate-600">{b.ReferredforTBDiagnosis || "No"}</td>
-                            <td className="p-3">
-                              {b.TBDetected &&
-                              (b.TBDetected.toLowerCase() === "yes" ||
-                                b.TBDetected.toLowerCase().includes("detected") ||
-                                b.TBDetected.toLowerCase().includes("positive")) ? (
-                                <span className="bg-rose-100 text-rose-800 border border-rose-300 font-bold px-1.5 py-0.5 rounded text-[10px]">
-                                  Detected
+                        {columns.map((col) => {
+                          const val = getCellValue(b, col.key);
+                          const isId = col.key === "id";
+                          const isName = col.key === "name";
+                          const isAction = col.key === "recommended_action";
+                          
+                          return (
+                            <td
+                              key={col.key}
+                              className={`p-3 ${isId ? "font-semibold text-slate-800 font-mono text-[11px]" : ""} ${
+                                isName ? "font-bold text-slate-950" : "text-slate-600"
+                              } ${isAction ? "font-semibold text-rose-700 bg-rose-50/40 rounded-sm" : ""}`}
+                            >
+                              {col.key === "nutrition" ? (
+                                <span
+                                  className={`px-2 py-0.5 rounded-full font-bold text-[10px] uppercase border ${
+                                    String(val).toUpperCase().includes("SAM") ||
+                                    String(val).toUpperCase().includes("SEVERE")
+                                      ? "bg-rose-100 text-rose-800 border-rose-300"
+                                      : String(val).toUpperCase().includes("MAM") ||
+                                        String(val).toUpperCase().includes("MODERATE")
+                                      ? "bg-orange-100 text-orange-800 border-orange-300"
+                                      : String(val).toUpperCase().includes("MILD")
+                                      ? "bg-amber-100 text-amber-800 border-amber-300"
+                                      : String(val).toUpperCase().includes("NORMAL")
+                                      ? "bg-emerald-100 text-emerald-800 border-emerald-300"
+                                      : "bg-slate-100 text-slate-600 border-slate-300"
+                                  }`}
+                                >
+                                  {val}
                                 </span>
+                              ) : col.key === "tb_detected" ? (
+                                String(val).toLowerCase() === "yes" ||
+                                String(val).toLowerCase().includes("detected") ||
+                                String(val).toLowerCase().includes("positive") ? (
+                                  <span className="bg-rose-100 text-rose-800 border border-rose-300 font-bold px-1.5 py-0.5 rounded text-[10px]">
+                                    Detected
+                                  </span>
+                                ) : (
+                                  val
+                                )
                               ) : (
-                                <span className="text-slate-500">{b.TBDetected || "No"}</span>
+                                val
                               )}
                             </td>
-                            <td className="p-3 font-mono font-bold text-slate-700">{b.CADScore ?? "-"}</td>
-                            <td className="p-3 font-mono text-slate-500 text-[10px]">
-                              {b.CADScoreDate || "-"}
-                            </td>
-                            <td className="p-3 font-semibold text-slate-600">{b.EligibleforTBTPT || "No"}</td>
-                          </>
-                        )}
-
-                        <td className="p-3 font-mono text-slate-600 text-right text-[11px] font-semibold">
-                          {b.DateOfLatestServiceProvided || "-"}
-                        </td>
+                          );
+                        })}
                       </tr>
                     ))
                   ) : (
                     <tr>
-                      <td colSpan={type === "nutrition" ? 12 : 15} className="p-6 text-center text-slate-400">
+                      <td colSpan={columns.length} className="p-6 text-center text-slate-400">
                         No matching clinical records found.
                       </td>
                     </tr>
@@ -648,68 +688,32 @@ export default function ClinicalDrilldownModal({
         </div>
       </div>
 
-      {/* 2. Hidden HTML print area container (Required for @media print rules in index.css) */}
+      {/* 2. Hidden HTML print area container (Required for @media print rules) */}
       <div id="ccw-report-print-area" className="hidden print:block bg-white text-black p-8">
         <div className="border-b-2 border-black pb-4 mb-6">
           <h1 className="text-2xl font-bold uppercase tracking-tight">CAPRS CLINICAL REPORT</h1>
           <p className="text-sm font-semibold uppercase mt-1">REPORT DATA: {title}</p>
           <p className="text-xs text-slate-600 mt-0.5">
-            Generated on: {new Date().toLocaleDateString()} | Total Deployed Cohort: {beneficiaries.length} Records
+            Generated on: {new Date().toLocaleDateString()} | Total Active Cohort: {beneficiaries.length} Records
           </p>
         </div>
 
         <table className="w-full text-xs text-left border-collapse">
           <thead>
             <tr className="border-b-2 border-black font-bold uppercase text-slate-800">
-              <th className="py-2 pr-2">VC Unique ID</th>
-              <th className="py-2 pr-2">Child Name</th>
-              <th className="py-2 pr-2">Age</th>
-              <th className="py-2 pr-2">Sex</th>
-              <th className="py-2 pr-2">Community</th>
-              <th className="py-2 pr-2">LGA</th>
-              <th className="py-2 pr-2">CCW</th>
-              {type === "nutrition" ? (
-                <>
-                  <th className="py-2 pr-2">Weight</th>
-                  <th className="py-2 pr-2">Height</th>
-                  <th className="py-2 pr-2">BMI</th>
-                  <th className="py-2 pr-2">Nutrition Status</th>
-                </>
-              ) : (
-                <>
-                  <th className="py-2 pr-2">Screening</th>
-                  <th className="py-2 pr-2">TB Detected</th>
-                  <th className="py-2 pr-2">CAD Score</th>
-                </>
-              )}
-              <th className="py-2 text-right">Latest Service Date</th>
+              {columns.slice(0, 8).map((col) => (
+                <th key={col.key} className="py-2 pr-2">{col.label}</th>
+              ))}
             </tr>
           </thead>
           <tbody>
             {sortedList.map((b, idx) => (
               <tr key={idx} className="border-b border-slate-300">
-                <td className="py-2 pr-2 font-mono font-bold">{b.VCUniqueID}</td>
-                <td className="py-2 pr-2 font-bold">{b.ChildName}</td>
-                <td className="py-2 pr-2">{b.Age}</td>
-                <td className="py-2 pr-2">{b.Sex}</td>
-                <td className="py-2 pr-2 truncate max-w-[100px]">{b.Community}</td>
-                <td className="py-2 pr-2 font-semibold">{b.LGA}</td>
-                <td className="py-2 pr-2 truncate max-w-[100px]">{b.CCWName}</td>
-                {type === "nutrition" ? (
-                  <>
-                    <td className="py-2 pr-2 font-mono">{b.Weight || "-"}</td>
-                    <td className="py-2 pr-2 font-mono">{b.Height || "-"}</td>
-                    <td className="py-2 pr-2 font-mono font-bold">{b.BMI || "-"}</td>
-                    <td className="py-2 pr-2 font-bold uppercase">{b.NutritionStatus || "Not Assessed"}</td>
-                  </>
-                ) : (
-                  <>
-                    <td className="py-2 pr-2 text-[10px]">{b.TBScreeningOutcome || "Not Screened"}</td>
-                    <td className="py-2 pr-2 font-bold">{b.TBDetected || "No"}</td>
-                    <td className="py-2 pr-2 font-mono">{b.CADScore ?? "-"}</td>
-                  </>
-                )}
-                <td className="py-2 text-right font-mono">{b.DateOfLatestServiceProvided}</td>
+                {columns.slice(0, 8).map((col) => (
+                  <td key={col.key} className="py-2 pr-2">
+                    {getCellValue(b, col.key)}
+                  </td>
+                ))}
               </tr>
             ))}
           </tbody>

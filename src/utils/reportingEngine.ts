@@ -656,6 +656,10 @@ export function passesFilters(b: Beneficiary, f: ReportFilters): boolean {
     if (b.EnrolmentStream !== f.EnrolmentStream) return false;
   }
 
+  if (f.CurrentHIVStatus && f.CurrentHIVStatus !== "All") {
+    if (b.CurrentHIVStatus !== f.CurrentHIVStatus) return false;
+  }
+
   return true;
 }
 
